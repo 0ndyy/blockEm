@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">blockEm</string>
+    <string name="service_description">Tracks your scroll limits.</string>
 </resources>
