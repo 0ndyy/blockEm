@@ -3,38 +3,56 @@ package ondy.example.blockem
 import android.accessibilityservice.AccessibilityService
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class BlockerService : AccessibilityService() {
 
-    // 2.4 Define Target Packages
     private val targetPackages = setOf(
-        "com.zhiliaoapp.musically", // tt
-        "com.instagram.android",    // instagram
-        "com.google.android.youtube"// youTube shorts
+        "com.zhiliaoapp.musically",
+        "com.instagram.android",
+        "com.google.android.youtube"
     )
+
+    private val job = SupervisorJob()
+    private val scope = CoroutineScope(Dispatchers.IO + job)
+    private lateinit var dataStore: ScrollDataStore
+
+    // prevents rapid event firing from counting as multiple scrolls
+    private var lastScrollTime = 0L
+
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        dataStore = ScrollDataStore(applicationContext)
+    }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
-
         val packageName = event.packageName?.toString() ?: return
 
-        // 2.5 Filter listener to only trigger for target apps
-        if (packageName !in targetPackages) {
-            return
-        }
+        if (packageName !in targetPackages) return
 
-        // Detect when the user opens/switches to a target app
-        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            Log.d("BlockerEngine", "Target App Active: $packageName")
-        }
-
-        // Detect when the user scrolls inside a target app
         if (event.eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
-            Log.d("BlockerEngine", "Scroll detected in: $packageName")
+            val currentTime = System.currentTimeMillis()
+
+            // 600ms cooldown / scroll detection
+            if (currentTime - lastScrollTime > 600) {
+                lastScrollTime = currentTime
+
+                scope.launch {
+                    dataStore.incrementScroll()
+                    Log.d("BlockerEngine", "scroll logged. package: $packageName")
+                }
+            }
         }
     }
 
-    override fun onInterrupt() {
-        Log.d("BlockerEngine", "Service Interrupted")
+    override fun onInterrupt() {}
+
+    override fun onDestroy() {
+        super.onDestroy()
+        job.cancel()
     }
 }
