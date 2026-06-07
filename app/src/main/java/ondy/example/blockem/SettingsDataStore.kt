@@ -19,6 +19,14 @@ class SettingsDataStore(private val context: Context) {
         val IG_ENABLED = booleanPreferencesKey("ig_enabled")
         val TT_ENABLED = booleanPreferencesKey("tt_enabled")
         val YT_ENABLED = booleanPreferencesKey("yt_enabled")
+
+        // New Exclusion Settings
+        val IGNORE_FIRST_SCROLL = booleanPreferencesKey("ignore_first_scroll")
+        val IGNORE_IG_HOME = booleanPreferencesKey("ignore_ig_home")
+        val IGNORE_DM_GLOBAL = booleanPreferencesKey("ignore_dm_global")
+        val IGNORE_DM_IG = booleanPreferencesKey("ignore_dm_ig")
+        val IGNORE_DM_TT = booleanPreferencesKey("ignore_dm_tt")
+
         val DAILY_SCROLLS = intPreferencesKey("daily_scrolls")
         val LAST_DATE = stringPreferencesKey("last_date")
     }
@@ -27,13 +35,19 @@ class SettingsDataStore(private val context: Context) {
     val igEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[IG_ENABLED] ?: true }
     val ttEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[TT_ENABLED] ?: true }
     val ytEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[YT_ENABLED] ?: true }
+
+    val ignoreFirstScrollFlow: Flow<Boolean> = context.dataStore.data.map { it[IGNORE_FIRST_SCROLL] ?: true }
+    val ignoreIgHomeFlow: Flow<Boolean> = context.dataStore.data.map { it[IGNORE_IG_HOME] ?: true }
+    val ignoreDmGlobalFlow: Flow<Boolean> = context.dataStore.data.map { it[IGNORE_DM_GLOBAL] ?: true }
+    val ignoreDmIgFlow: Flow<Boolean> = context.dataStore.data.map { it[IGNORE_DM_IG] ?: true }
+    val ignoreDmTtFlow: Flow<Boolean> = context.dataStore.data.map { it[IGNORE_DM_TT] ?: true }
+
     val dailyScrollsFlow: Flow<Int> = context.dataStore.data.map { it[DAILY_SCROLLS] ?: 0 }
 
     suspend fun setSwitch(key: androidx.datastore.preferences.core.Preferences.Key<Boolean>, value: Boolean) {
         context.dataStore.edit { prefs -> prefs[key] = value }
     }
 
-    // Increments the count, but resets to 0 first if it's a new day!
     suspend fun incrementScroll(): Int {
         var newCount = 0
         val today = LocalDate.now().toString()
@@ -51,6 +65,5 @@ class SettingsDataStore(private val context: Context) {
             prefs[DAILY_SCROLLS] = newCount
         }
         return newCount
-
     }
 }

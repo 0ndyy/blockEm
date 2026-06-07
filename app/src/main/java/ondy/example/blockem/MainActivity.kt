@@ -11,6 +11,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
@@ -19,6 +21,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -30,7 +33,6 @@ import androidx.navigation.compose.*
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
 import ondy.example.blockem.ui.theme.BlockEmTheme
-import androidx.compose.ui.graphics.Color
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,7 +54,6 @@ fun AppNavigation() {
 
     var hasPerms by remember { mutableStateOf(checkAllPermissions(context)) }
 
-    // Re-check permissions when returning to the app
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -76,12 +77,8 @@ fun AppNavigation() {
                 }
             )
         }
-        composable("main_dashboard") {
-            MainDashboardScreen(navController)
-        }
-        composable("scroll_category") {
-            ScrollCategoryScreen(onBack = { navController.popBackStack() })
-        }
+        composable("main_dashboard") { MainDashboardScreen(navController) }
+        composable("scroll_category") { ScrollCategoryScreen(onBack = { navController.popBackStack() }) }
     }
 }
 
@@ -123,7 +120,6 @@ fun MainDashboardScreen(navController: NavHostController) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(navController: NavHostController) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -136,7 +132,7 @@ fun HomeScreen(navController: NavHostController) {
             Row(modifier = Modifier.padding(24.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column {
                     Text("Scroll Counter", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Text("Manage tracking for videos", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Manage tracking & exclusions", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -149,11 +145,20 @@ fun ScrollCategoryScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val dataStore = remember { SettingsDataStore(context) }
     val scope = rememberCoroutineScope()
+    val scrollState = rememberScrollState()
 
+    // Base targets
     val global by dataStore.globalEnabledFlow.collectAsState(initial = true)
     val ig by dataStore.igEnabledFlow.collectAsState(initial = true)
     val tt by dataStore.ttEnabledFlow.collectAsState(initial = true)
     val yt by dataStore.ytEnabledFlow.collectAsState(initial = true)
+
+    // Exclusions
+    val ignoreFirst by dataStore.ignoreFirstScrollFlow.collectAsState(initial = true)
+    val ignoreIgHome by dataStore.ignoreIgHomeFlow.collectAsState(initial = true)
+    val ignoreDmGlobal by dataStore.ignoreDmGlobalFlow.collectAsState(initial = true)
+    val ignoreDmIg by dataStore.ignoreDmIgFlow.collectAsState(initial = true)
+    val ignoreDmTt by dataStore.ignoreDmTtFlow.collectAsState(initial = true)
 
     Scaffold(
         topBar = {
@@ -162,7 +167,8 @@ fun ScrollCategoryScreen(onBack: () -> Unit) {
             })
         }
     ) { padding ->
-        Column(modifier = Modifier.padding(padding).padding(16.dp)) {
+        Column(modifier = Modifier.padding(padding).padding(16.dp).verticalScroll(scrollState)) {
+
             // Global Switch
             Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Enable Scroll Tracking", fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -170,12 +176,27 @@ fun ScrollCategoryScreen(onBack: () -> Unit) {
             }
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
-            // App Switches
+            // Target Apps
             Text("Target Apps", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
-
             AppSwitchRow("Instagram Reels", ig, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.IG_ENABLED, it) } }
             AppSwitchRow("TikTok", tt, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.TT_ENABLED, it) } }
             AppSwitchRow("YouTube Shorts", yt, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.YT_ENABLED, it) } }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+
+            // Exclusions
+            Text("Exclusions", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
+
+            AppSwitchRow("Ignore First Scroll on App Open", ignoreFirst, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.IGNORE_FIRST_SCROLL, it) } }
+            AppSwitchRow("Ignore IG Home Feed Videos", ignoreIgHome, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.IGNORE_IG_HOME, it) } }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            AppSwitchRow("Ignore DM Videos (Global)", ignoreDmGlobal, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.IGNORE_DM_GLOBAL, it) } }
+
+            if (ignoreDmGlobal) {
+                AppSwitchRow("   ↳ Instagram DMs", ignoreDmIg, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.IGNORE_DM_IG, it) } }
+                AppSwitchRow("   ↳ TikTok DMs", ignoreDmTt, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.IGNORE_DM_TT, it) } }
+            }
         }
     }
 }
@@ -183,7 +204,7 @@ fun ScrollCategoryScreen(onBack: () -> Unit) {
 @Composable
 fun AppSwitchRow(name: String, checked: Boolean, enabled: Boolean, onCheckedChange: (Boolean) -> Unit) {
     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(name, fontSize = 18.sp, color = if (enabled) MaterialTheme.colorScheme.onSurface else Color.Gray)
+        Text(name, fontSize = 16.sp, color = if (enabled) MaterialTheme.colorScheme.onSurface else Color.Gray)
         Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
 }
