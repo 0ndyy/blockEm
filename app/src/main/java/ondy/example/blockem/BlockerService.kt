@@ -18,7 +18,7 @@ class BlockerService : AccessibilityService() {
 
     private var lastScrollTime = 0L
     private var currentForegroundApp = ""
-    private var isFirstScroll = false
+    private var hasScrolledInApp = false
 
     // Target states
     private var globalEnabled = true
@@ -34,9 +34,9 @@ class BlockerService : AccessibilityService() {
     private var ignoreDmTt = true
 
     private val targetPackages = setOf(
-        "com.zhiliaoapp.musically",
-        "com.instagram.android",
-        "com.google.android.youtube"
+        "com.zhiliaoapp.musically", // TikTok
+        "com.instagram.android",    // Instagram
+        "com.google.android.youtube"// YouTube
     )
 
     override fun onServiceConnected() {
@@ -60,14 +60,14 @@ class BlockerService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null || !globalEnabled) return
 
-        // 1. Detect App Swapping (FIXED FIRST-SCROLL BUG)
+        // 1. App Swap Detection -> Resets "First Scroll" safely
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            val pkg = event.packageName?.toString()
-            // ONLY reset the first scroll if we actually changed apps.
-            // (Previous version reset on every swipe!)
-            if (pkg != null && pkg != currentForegroundApp) {
+            val pkg = event.packageName?.toString() ?: ""
+            // ONLY reset the "first scroll" flag when we literally switch apps.
+            // This stops the bug where it ignored everything!
+            if (pkg.isNotEmpty() && pkg != currentForegroundApp) {
                 currentForegroundApp = pkg
-                isFirstScroll = true
+                hasScrolledInApp = false
             }
         }
 
@@ -90,47 +90,45 @@ class BlockerService : AccessibilityService() {
             }
             if (scrollNode == null) return
 
-            // Ensure it's a full-screen video player (Flawless Geometric Check)
-            // This naturally ignores comments and DM text chats.
-            if (isFullScreenVideoFeed(scrollNode)) {
+            // DigiPaws logic: Only trigger on ViewPagers and RecyclerViews
+            val className = scrollNode.className?.toString() ?: ""
+            val isPager = className.contains("ViewPager", true) ||
+                    className.contains("RecyclerView", true) ||
+                    className.contains("ScrollView", true)
+
+            // Flawless Geometric Check (Isolates Reels/FYP perfectly from comments/chats)
+            if (isPager && isFullScreenVideoFeed(scrollNode)) {
                 val currentTime = System.currentTimeMillis()
 
                 if (currentTime - lastScrollTime > 800) {
 
+                    val wasFirst = !hasScrolledInApp
+                    hasScrolledInApp = true
+                    lastScrollTime = currentTime
+
                     // --- EXCLUSION CHECKS ---
 
-                    // A. Ignore DM Videos (FIXED DM BUG)
+                    // A. Ignore DM Videos
                     if (ignoreDmGlobal) {
-                        val checkIg = packageName == "com.instagram.android" && ignoreDmIg
-                        val checkTt = packageName == "com.zhiliaoapp.musically" && ignoreDmTt
-
-                        if (checkIg || checkTt) {
-                            // If we find a "Back" button, we are in a DM video player. Ignore the scroll!
-                            if (isSubScreen(rootInActiveWindow)) {
-                                lastScrollTime = currentTime
-                                return
-                            }
+                        if (packageName == "com.zhiliaoapp.musically" && ignoreDmTt) {
+                            if (isTikTokDm(rootInActiveWindow)) return
+                        }
+                        if (packageName == "com.instagram.android" && ignoreDmIg) {
+                            if (isIgDmVideo(rootInActiveWindow)) return
                         }
                     }
 
                     // B. Ignore IG Home Feed
                     if (packageName == "com.instagram.android" && ignoreIgHome) {
-                        if (isIgHomeFeed(rootInActiveWindow)) {
-                            lastScrollTime = currentTime
-                            return
-                        }
+                        if (isIgHomeTabSelected(rootInActiveWindow)) return
                     }
 
                     // C. Ignore First Scroll
-                    if (ignoreFirstScroll && isFirstScroll) {
-                        isFirstScroll = false
-                        lastScrollTime = currentTime
+                    if (ignoreFirstScroll && wasFirst) {
                         return
                     }
-                    isFirstScroll = false // clear it to be safe
 
                     // --- COUNT IT ---
-                    lastScrollTime = currentTime
                     scope.launch {
                         val newTotal = dataStore.incrementScroll()
                         overlay.flashCount(newTotal)
@@ -140,38 +138,32 @@ class BlockerService : AccessibilityService() {
         }
     }
 
-    // POSITIVE CHECK: DM Videos open in full screen but ALWAYS have a "Back" arrow at the top.
-    // The main FYP and Reels tabs do not have back arrows.
-    private fun isSubScreen(root: AccessibilityNodeInfo?): Boolean {
+    // NATIVE CHECK: If "Send", "Share", "Like", or "Comment" buttons are MISSING,
+    // we are mathematically inside a private DM video player.
+    // As soon as you swipe down to the FYP, the Send button appears, and it COUNTS!
+    private fun isIgDmVideo(root: AccessibilityNodeInfo?): Boolean {
         if (root == null) return false
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
 
+        var hasPublicButtons = false
         while (queue.isNotEmpty()) {
             val node = queue.poll() ?: continue
-
-            // Standard Android labels for back buttons
             val desc = node.contentDescription?.toString()?.lowercase() ?: ""
-            if (desc == "back" || desc == "navigate up" || desc == "close") {
-                return true
-            }
 
-            // Also check IDs just in case
-            val id = node.viewIdResourceName?.lowercase() ?: ""
-            if (id.contains("back_button") || id.contains("action_bar_back")) {
-                return true
+            if (desc == "send" || desc == "share" || desc == "like" || desc == "comment") {
+                hasPublicButtons = true
+                break
             }
-
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let { queue.add(it) }
             }
         }
-        // No back button found -> We are on the main FYP/Reels!
-        return false
+        return !hasPublicButtons
     }
 
-    // POSITIVE CHECK: The IG Home feed has the literal "Instagram" text logo at the top left.
-    private fun isIgHomeFeed(root: AccessibilityNodeInfo?): Boolean {
+    // NATIVE CHECK: TikTok DM viewers have a "Back" button, FYP does not.
+    private fun isTikTokDm(root: AccessibilityNodeInfo?): Boolean {
         if (root == null) return false
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
@@ -179,8 +171,10 @@ class BlockerService : AccessibilityService() {
         while (queue.isNotEmpty()) {
             val node = queue.poll() ?: continue
             val desc = node.contentDescription?.toString()?.lowercase() ?: ""
-            if (desc == "instagram") return true
 
+            if (desc == "back" || desc == "go back") {
+                return true
+            }
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let { queue.add(it) }
             }
@@ -188,20 +182,41 @@ class BlockerService : AccessibilityService() {
         return false
     }
 
-    // GEOMETRIC CHECK: Flawlessly detects video feeds by measuring the screen.
+    // NATIVE CHECK: If the "Home" tab is actively selected, we are on the Home feed carousel.
+    private fun isIgHomeTabSelected(root: AccessibilityNodeInfo?): Boolean {
+        if (root == null) return false
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+
+        while (queue.isNotEmpty()) {
+            val node = queue.poll() ?: continue
+            val desc = node.contentDescription?.toString()?.lowercase() ?: ""
+
+            if ((desc.contains("home") || desc.contains("inicio")) && node.isSelected) {
+                return true
+            }
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { queue.add(it) }
+            }
+        }
+        return false
+    }
+
     private fun isFullScreenVideoFeed(scrollNode: AccessibilityNodeInfo): Boolean {
         val listRect = Rect()
         scrollNode.getBoundsInScreen(listRect)
 
         val screenHeight = resources.displayMetrics.heightPixels
-        if (listRect.height() < screenHeight * 0.5) return false
+        // Scroll area must be at least 60% of the screen
+        if (listRect.height() < screenHeight * 0.6) return false
 
         for (i in 0 until scrollNode.childCount) {
             val child = scrollNode.getChild(i) ?: continue
             val childRect = Rect()
             child.getBoundsInScreen(childRect)
 
-            if (childRect.height() >= listRect.height() * 0.85) {
+            // If a child item takes up 80%+ of the container, it's a short-form video player
+            if (childRect.height() >= listRect.height() * 0.80) {
                 return true
             }
         }
@@ -241,4 +256,4 @@ class BlockerService : AccessibilityService() {
         super.onDestroy()
         overlay.detach()
     }
-}   
+}
