@@ -20,13 +20,13 @@ class SettingsDataStore(private val context: Context) {
         val TT_ENABLED = booleanPreferencesKey("tt_enabled")
         val YT_ENABLED = booleanPreferencesKey("yt_enabled")
 
-        // New Exclusion Settings
         val IGNORE_FIRST_SCROLL = booleanPreferencesKey("ignore_first_scroll")
         val IGNORE_IG_HOME = booleanPreferencesKey("ignore_ig_home")
         val IGNORE_DM_GLOBAL = booleanPreferencesKey("ignore_dm_global")
         val IGNORE_DM_IG = booleanPreferencesKey("ignore_dm_ig")
         val IGNORE_DM_TT = booleanPreferencesKey("ignore_dm_tt")
 
+        val MAX_SCROLLS = intPreferencesKey("max_scrolls") // NEW: Max Limit
         val DAILY_SCROLLS = intPreferencesKey("daily_scrolls")
         val LAST_DATE = stringPreferencesKey("last_date")
     }
@@ -42,10 +42,16 @@ class SettingsDataStore(private val context: Context) {
     val ignoreDmIgFlow: Flow<Boolean> = context.dataStore.data.map { it[IGNORE_DM_IG] ?: true }
     val ignoreDmTtFlow: Flow<Boolean> = context.dataStore.data.map { it[IGNORE_DM_TT] ?: true }
 
+    val maxScrollsFlow: Flow<Int> = context.dataStore.data.map { it[MAX_SCROLLS] ?: 50 } // Default limit 50
     val dailyScrollsFlow: Flow<Int> = context.dataStore.data.map { it[DAILY_SCROLLS] ?: 0 }
 
     suspend fun setSwitch(key: androidx.datastore.preferences.core.Preferences.Key<Boolean>, value: Boolean) {
         context.dataStore.edit { prefs -> prefs[key] = value }
+    }
+
+    // NEW: Save custom limit
+    suspend fun setMaxScrolls(max: Int) {
+        context.dataStore.edit { prefs -> prefs[MAX_SCROLLS] = max }
     }
 
     suspend fun incrementScroll(): Int {

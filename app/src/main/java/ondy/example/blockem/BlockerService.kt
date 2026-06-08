@@ -13,12 +13,19 @@ import java.util.ArrayDeque
 class BlockerService : AccessibilityService() {
 
     private lateinit var overlay: CounterOverlay
+    private lateinit var blockOverlay: BlockOverlay
     private lateinit var dataStore: SettingsDataStore
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    // BUG FIX: Changed from Dispatchers.IO to Dispatchers.Main
+    // This ensures that when the limit is hit, the UI is drawn on the correct thread!
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private var lastScrollTime = 0L
     private var currentForegroundApp = ""
     private var hasScrolledInApp = false
+
+    private var currentScrollCount = 0
+    private var maxScrolls = 50
 
     // Target states
     private var globalEnabled = true
@@ -34,16 +41,26 @@ class BlockerService : AccessibilityService() {
     private var ignoreDmTt = true
 
     private val targetPackages = setOf(
-        "com.zhiliaoapp.musically", // TikTok
-        "com.instagram.android",    // Instagram
-        "com.google.android.youtube"// YouTube
+        "com.zhiliaoapp.musically",
+        "com.instagram.android",
+        "com.google.android.youtube"
     )
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+
+        dataStore = SettingsDataStore(applicationContext)
         overlay = CounterOverlay(this)
         overlay.attach()
-        dataStore = SettingsDataStore(applicationContext)
+
+        blockOverlay = BlockOverlay(this) {
+            performGlobalAction(GLOBAL_ACTION_HOME)
+            blockOverlay.hideWindow()
+        }
+
+        // Live listeners
+        scope.launch { dataStore.dailyScrollsFlow.collect { currentScrollCount = it } }
+        scope.launch { dataStore.maxScrollsFlow.collect { maxScrolls = it } }
 
         scope.launch { dataStore.globalEnabledFlow.collect { globalEnabled = it } }
         scope.launch { dataStore.igEnabledFlow.collect { igEnabled = it } }
@@ -60,14 +77,15 @@ class BlockerService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null || !globalEnabled) return
 
-        // 1. App Swap Detection -> Resets "First Scroll" safely
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = event.packageName?.toString() ?: ""
-            // ONLY reset the "first scroll" flag when we literally switch apps.
-            // This stops the bug where it ignored everything!
             if (pkg.isNotEmpty() && pkg != currentForegroundApp) {
                 currentForegroundApp = pkg
                 hasScrolledInApp = false
+
+                if (pkg !in targetPackages) {
+                    blockOverlay.hideWindow()
+                }
             }
         }
 
@@ -82,7 +100,6 @@ class BlockerService : AccessibilityService() {
         }
         if (!isAppEnabled) return
 
-        // 2. Handle the Scroll
         if (event.eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
             var scrollNode = event.source
             if (scrollNode == null || !scrollNode.isScrollable) {
@@ -90,67 +107,54 @@ class BlockerService : AccessibilityService() {
             }
             if (scrollNode == null) return
 
-            // DigiPaws logic: Only trigger on ViewPagers and RecyclerViews
             val className = scrollNode.className?.toString() ?: ""
             val isPager = className.contains("ViewPager", true) ||
                     className.contains("RecyclerView", true) ||
                     className.contains("ScrollView", true)
 
-            // Flawless Geometric Check (Isolates Reels/FYP perfectly from comments/chats)
             if (isPager && isFullScreenVideoFeed(scrollNode)) {
                 val currentTime = System.currentTimeMillis()
 
                 if (currentTime - lastScrollTime > 800) {
-
                     val wasFirst = !hasScrolledInApp
                     hasScrolledInApp = true
                     lastScrollTime = currentTime
 
-                    // --- EXCLUSION CHECKS ---
-
-                    // A. Ignore DM Videos
                     if (ignoreDmGlobal) {
-                        if (packageName == "com.zhiliaoapp.musically" && ignoreDmTt) {
-                            if (isTikTokDm(rootInActiveWindow)) return
-                        }
-                        if (packageName == "com.instagram.android" && ignoreDmIg) {
-                            if (isIgDmVideo(rootInActiveWindow)) return
-                        }
+                        if (packageName == "com.zhiliaoapp.musically" && ignoreDmTt && isTikTokDm(rootInActiveWindow)) return
+                        if (packageName == "com.instagram.android" && ignoreDmIg && isIgDmVideo(rootInActiveWindow)) return
                     }
+                    if (packageName == "com.instagram.android" && ignoreIgHome && isIgHomeTabSelected(rootInActiveWindow)) return
+                    if (ignoreFirstScroll && wasFirst) return
 
-                    // B. Ignore IG Home Feed
-                    if (packageName == "com.instagram.android" && ignoreIgHome) {
-                        if (isIgHomeTabSelected(rootInActiveWindow)) return
-                    }
-
-                    // C. Ignore First Scroll
-                    if (ignoreFirstScroll && wasFirst) {
+                    // If they are already blocked but try to scroll anyway, show block again and abort
+                    if (currentScrollCount >= maxScrolls) {
+                        blockOverlay.showWindow()
                         return
                     }
 
-                    // --- COUNT IT ---
+                    // Count the scroll and check limit ON THE MAIN THREAD
                     scope.launch {
                         val newTotal = dataStore.incrementScroll()
-                        overlay.flashCount(newTotal)
+                        if (newTotal >= maxScrolls) {
+                            blockOverlay.showWindow()
+                        } else {
+                            overlay.flashCount(newTotal)
+                        }
                     }
                 }
             }
         }
     }
 
-    // NATIVE CHECK: If "Send", "Share", "Like", or "Comment" buttons are MISSING,
-    // we are mathematically inside a private DM video player.
-    // As soon as you swipe down to the FYP, the Send button appears, and it COUNTS!
     private fun isIgDmVideo(root: AccessibilityNodeInfo?): Boolean {
         if (root == null) return false
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
-
         var hasPublicButtons = false
         while (queue.isNotEmpty()) {
             val node = queue.poll() ?: continue
             val desc = node.contentDescription?.toString()?.lowercase() ?: ""
-
             if (desc == "send" || desc == "share" || desc == "like" || desc == "comment") {
                 hasPublicButtons = true
                 break
@@ -162,19 +166,14 @@ class BlockerService : AccessibilityService() {
         return !hasPublicButtons
     }
 
-    // NATIVE CHECK: TikTok DM viewers have a "Back" button, FYP does not.
     private fun isTikTokDm(root: AccessibilityNodeInfo?): Boolean {
         if (root == null) return false
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
-
         while (queue.isNotEmpty()) {
             val node = queue.poll() ?: continue
             val desc = node.contentDescription?.toString()?.lowercase() ?: ""
-
-            if (desc == "back" || desc == "go back") {
-                return true
-            }
+            if (desc == "back" || desc == "go back") return true
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let { queue.add(it) }
             }
@@ -182,19 +181,14 @@ class BlockerService : AccessibilityService() {
         return false
     }
 
-    // NATIVE CHECK: If the "Home" tab is actively selected, we are on the Home feed carousel.
     private fun isIgHomeTabSelected(root: AccessibilityNodeInfo?): Boolean {
         if (root == null) return false
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
-
         while (queue.isNotEmpty()) {
             val node = queue.poll() ?: continue
             val desc = node.contentDescription?.toString()?.lowercase() ?: ""
-
-            if ((desc.contains("home") || desc.contains("inicio")) && node.isSelected) {
-                return true
-            }
+            if ((desc.contains("home") || desc.contains("inicio")) && node.isSelected) return true
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let { queue.add(it) }
             }
@@ -205,20 +199,13 @@ class BlockerService : AccessibilityService() {
     private fun isFullScreenVideoFeed(scrollNode: AccessibilityNodeInfo): Boolean {
         val listRect = Rect()
         scrollNode.getBoundsInScreen(listRect)
-
         val screenHeight = resources.displayMetrics.heightPixels
-        // Scroll area must be at least 60% of the screen
         if (listRect.height() < screenHeight * 0.6) return false
-
         for (i in 0 until scrollNode.childCount) {
             val child = scrollNode.getChild(i) ?: continue
             val childRect = Rect()
             child.getBoundsInScreen(childRect)
-
-            // If a child item takes up 80%+ of the container, it's a short-form video player
-            if (childRect.height() >= listRect.height() * 0.80) {
-                return true
-            }
+            if (childRect.height() >= listRect.height() * 0.80) return true
         }
         return false
     }
@@ -227,13 +214,10 @@ class BlockerService : AccessibilityService() {
         if (root == null) return null
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
-
         var largest: AccessibilityNodeInfo? = null
         var maxArea = 0
-
         while (queue.isNotEmpty()) {
             val node = queue.poll() ?: continue
-
             if (node.isScrollable) {
                 val rect = Rect()
                 node.getBoundsInScreen(rect)
@@ -255,5 +239,6 @@ class BlockerService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         overlay.detach()
+        blockOverlay.hideWindow()
     }
 }

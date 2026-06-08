@@ -2,10 +2,11 @@ package ondy.example.blockem
 
 import android.content.Context
 import android.graphics.PixelFormat
-import android.view.Gravity
 import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -14,37 +15,43 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.*
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 
-
-class BlockOverlay(private val context: Context) {
+class BlockOverlay(private val context: Context, private val onReturnClicked: () -> Unit) {
 
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private var composeView: ComposeView? = null
-    private var isShowing = false
+    var isShowing = false
+        private set
 
-    fun show() {
+    fun showWindow() {
         if (isShowing) return
 
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            // FLAG_LAYOUT_IN_SCREEN makes it cover everything.
+            // Notice there is NO 'FLAG_NOT_TOUCHABLE'. We WANT to intercept your touches!
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.CENTER
-        }
+        )
 
-        val lifecycleOwner = OverlayLifecycleOwner()
+        val lifecycleOwner = BlockLifecycleOwner()
         lifecycleOwner.start()
 
         composeView = ComposeView(context).apply {
@@ -53,7 +60,7 @@ class BlockOverlay(private val context: Context) {
             setViewTreeSavedStateRegistryOwner(lifecycleOwner)
 
             setContent {
-                BlockScreen()
+                BlockScreenUI(onReturnClicked)
             }
         }
 
@@ -61,7 +68,7 @@ class BlockOverlay(private val context: Context) {
         isShowing = true
     }
 
-    fun hide() {
+    fun hideWindow() {
         if (!isShowing) return
         composeView?.let { windowManager.removeView(it) }
         composeView = null
@@ -70,32 +77,44 @@ class BlockOverlay(private val context: Context) {
 }
 
 @Composable
-fun BlockScreen() {
+fun BlockScreenUI(onReturnClicked: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.95f)),
         contentAlignment = Alignment.Center
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(32.dp)
+        ) {
             Text(
                 text = "Limit Reached",
                 color = Color.White,
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Bold
+                fontSize = 36.sp,
+                fontWeight = FontWeight.ExtraBold
             )
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                text = "you've hit your scroll limit for today.",
+                text = "You've hit your daily scroll limit. Time to do something else.",
                 color = Color.LightGray,
-                fontSize = 18.sp
+                fontSize = 18.sp,
+                textAlign = TextAlign.Center
             )
+            Spacer(modifier = Modifier.height(48.dp))
+
+            Button(
+                onClick = onReturnClicked,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                modifier = Modifier.fillMaxWidth(0.6f).height(50.dp)
+            ) {
+                Text("Return", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
 
-// compose requires lifecycle owners to function properly outside an activity
-private class OverlayLifecycleOwner : LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
+private class BlockLifecycleOwner : LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
     private val lifecycleRegistry = LifecycleRegistry(this)
     private val savedStateRegistryController = SavedStateRegistryController.create(this)
     private val store = ViewModelStore()

@@ -131,8 +131,8 @@ fun HomeScreen(navController: NavHostController) {
         ) {
             Row(modifier = Modifier.padding(24.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column {
-                    Text("Scroll Counter", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Text("Manage tracking & exclusions", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Scroll Counter & Blocker", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text("Manage tracking & hard limits", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -147,13 +147,13 @@ fun ScrollCategoryScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
 
-    // Base targets
     val global by dataStore.globalEnabledFlow.collectAsState(initial = true)
     val ig by dataStore.igEnabledFlow.collectAsState(initial = true)
     val tt by dataStore.ttEnabledFlow.collectAsState(initial = true)
     val yt by dataStore.ytEnabledFlow.collectAsState(initial = true)
 
-    // Exclusions
+    val maxScrolls by dataStore.maxScrollsFlow.collectAsState(initial = 50)
+
     val ignoreFirst by dataStore.ignoreFirstScrollFlow.collectAsState(initial = true)
     val ignoreIgHome by dataStore.ignoreIgHomeFlow.collectAsState(initial = true)
     val ignoreDmGlobal by dataStore.ignoreDmGlobalFlow.collectAsState(initial = true)
@@ -171,12 +171,27 @@ fun ScrollCategoryScreen(onBack: () -> Unit) {
 
             // Global Switch
             Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Enable Scroll Tracking", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text("Enable Engine", fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Switch(checked = global, onCheckedChange = { scope.launch { dataStore.setSwitch(SettingsDataStore.GLOBAL_ENABLED, it) } })
             }
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
-            // Target Apps
+            // -- NEW: SCROLL LIMIT PANEL --
+            Text("Hard Limit", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
+            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Max Scrolls / Day", fontSize = 16.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    FilledTonalIconButton(onClick = { scope.launch { dataStore.setMaxScrolls(maxOf(1, maxScrolls - 5)) } }) {
+                        Text("-", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Text("$maxScrolls", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp))
+                    FilledTonalIconButton(onClick = { scope.launch { dataStore.setMaxScrolls(maxScrolls + 5) } }) {
+                        Text("+", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+
             Text("Target Apps", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
             AppSwitchRow("Instagram Reels", ig, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.IG_ENABLED, it) } }
             AppSwitchRow("TikTok", tt, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.TT_ENABLED, it) } }
@@ -184,9 +199,7 @@ fun ScrollCategoryScreen(onBack: () -> Unit) {
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
-            // Exclusions
             Text("Exclusions", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
-
             AppSwitchRow("Ignore First Scroll on App Open", ignoreFirst, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.IGNORE_FIRST_SCROLL, it) } }
             AppSwitchRow("Ignore IG Home Feed Videos", ignoreIgHome, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.IGNORE_IG_HOME, it) } }
 
