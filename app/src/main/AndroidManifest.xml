@@ -27,6 +27,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".BlockActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.BlockEm" />
+
         <service
             android:name=".BlockerService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
