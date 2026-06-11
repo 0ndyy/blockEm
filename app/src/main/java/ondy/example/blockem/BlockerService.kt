@@ -70,13 +70,27 @@ class BlockerService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null || !globalEnabled) return
 
-        // REVERTED: We removed the 'pkg != currentForegroundApp' check.
-        // This makes sure opening a DM sub-screen perfectly resets the "First Scroll" flag!
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = event.packageName?.toString() ?: ""
             if (pkg.isNotEmpty() && pkg != "ondy.example.blockem") {
                 currentForegroundApp = pkg
                 hasScrolledInApp = false
+            }
+
+            // NEW: Instantly penalize opening TikTok DMs if the ignore toggle is OFF
+            if (pkg == "com.zhiliaoapp.musically" && ttEnabled) {
+                val shouldIgnoreTtDm = ignoreDmGlobal && ignoreDmTt
+                // If we are NOT ignoring TT DMs, and we see a TT DM on screen:
+                if (!shouldIgnoreTtDm && isTikTokDm(rootInActiveWindow)) {
+                    val currentTime = System.currentTimeMillis()
+                    if (currentTime - lastScrollTime > 800) {
+                        val wasFirst = !hasScrolledInApp
+                        hasScrolledInApp = true
+                        lastScrollTime = currentTime
+
+                        triggerScrollPenalty(wasFirst)
+                    }
+                }
             }
         }
 
@@ -108,29 +122,18 @@ class BlockerService : AccessibilityService() {
 
                 if (currentTime - lastScrollTime > 800) {
                     val wasFirst = !hasScrolledInApp
-                    hasScrolledInApp = true
-                    lastScrollTime = currentTime
 
+                    // Respect ignores
                     if (ignoreDmGlobal) {
                         if (packageName == "com.zhiliaoapp.musically" && ignoreDmTt && isTikTokDm(rootInActiveWindow)) return
                         if (packageName == "com.instagram.android" && ignoreDmIg && isIgDmVideo(rootInActiveWindow)) return
                     }
                     if (packageName == "com.instagram.android" && ignoreIgHome && isIgHomeFeed(rootInActiveWindow)) return
-                    if (ignoreFirstScroll && wasFirst) return
 
-                    if (currentScrollCount >= maxScrolls) {
-                        launchBlockActivity()
-                        return
-                    }
-
-                    scope.launch {
-                        val newTotal = dataStore.incrementScroll()
-                        if (newTotal >= maxScrolls) {
-                            launchBlockActivity()
-                        } else {
-                            overlay.flashCount(newTotal)
-                        }
-                    }
+                    // All clear, apply penalty
+                    hasScrolledInApp = true
+                    lastScrollTime = currentTime
+                    triggerScrollPenalty(wasFirst)
                 }
             }
         }
@@ -141,6 +144,27 @@ class BlockerService : AccessibilityService() {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
         startActivity(intent)
+    }
+
+    private fun triggerScrollPenalty(wasFirst: Boolean) {
+        // If they have "Ignore First Scroll" toggled on, give them a freebie
+        if (ignoreFirstScroll && wasFirst) return
+
+        // If they are already over the limit, boot them out
+        if (currentScrollCount >= maxScrolls) {
+            launchBlockActivity()
+            return
+        }
+
+        // Otherwise, increment the counter and flash the pill
+        scope.launch {
+            val newTotal = dataStore.incrementScroll()
+            if (newTotal >= maxScrolls) {
+                launchBlockActivity()
+            } else {
+                overlay.flashCount(newTotal)
+            }
+        }
     }
 
     private fun isIgDmVideo(root: AccessibilityNodeInfo?): Boolean {
