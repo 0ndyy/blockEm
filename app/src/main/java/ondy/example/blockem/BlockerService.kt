@@ -156,21 +156,24 @@ class BlockerService : AccessibilityService() {
             val desc = node.contentDescription?.toString()?.trim()?.lowercase() ?: ""
             val viewId = node.viewIdResourceName?.lowercase() ?: ""
 
-            // 1. Curbox Method: Check for explicit Instagram Direct Message View IDs
-            // The reel viewer inside DMs utilizes these specific internal IDs.
-            if (viewId.contains("direct_") || viewId.contains("thread_") || viewId.contains("message_composer")) {
+            // 1. Precise Curbox Method: Target specific DM text boxes and containers.
+            // This guarantees we don't accidentally match the "action_bar_direct_button" on the Home Feed.
+            if (viewId.contains("direct_reply_to_author") ||
+                viewId.contains("direct_visual_message") ||
+                viewId.contains("message_composer")
+            ) {
                 return true
             }
 
-            // 2. The Text Box Method: Normal reels don't have an EditText at the bottom.
-            // If we see an EditText (and it's not the "Add a comment..." box), we are guaranteed to be in a DM.
+            // 2. The Text Box Method: Triggers if there is an EditText that isn't for comments or search.
             if (className.contains("EditText", ignoreCase = true)) {
-                if (!text.contains("comment") && !desc.contains("comment")) {
+                if (!text.contains("comment") && !desc.contains("comment") &&
+                    !text.contains("search") && !desc.contains("search")) {
                     return true
                 }
             }
 
-            // 3. Text content fallbacks (Checking the hint text inside the reply box)
+            // 3. Text content fallbacks
             if (text == "message..." || text.startsWith("reply to")) {
                 return true
             }
@@ -199,7 +202,7 @@ class BlockerService : AccessibilityService() {
         return false
     }
 
-    // POSITIVE CHECK: Detects the normal Home feed OR any Reel opened from the Home/Explore/Profile page.
+    // POSITIVE CHECK: Detects ONLY the actual Home feed.
     private fun isIgHomeFeed(root: AccessibilityNodeInfo?): Boolean {
         if (root == null) return false
         val queue = ArrayDeque<AccessibilityNodeInfo>()
@@ -207,17 +210,16 @@ class BlockerService : AccessibilityService() {
 
         while (queue.isNotEmpty()) {
             val node = queue.poll() ?: continue
-            val desc = node.contentDescription?.toString()?.lowercase() ?: ""
-            val id = node.viewIdResourceName?.lowercase() ?: ""
+            val desc = node.contentDescription?.toString()?.trim()?.lowercase() ?: ""
 
-            // 1. Check if we are on the normal Home feed (Home tab is selected)
+            // 1. Check if the "Home" button on the bottom navigation bar is currently selected.
+            // This is the most reliable indicator of the main feed.
             if ((desc.contains("home") || desc.contains("inicio")) && node.isSelected) {
                 return true
             }
 
-            // 2. Check if we clicked into a Reel from the Home/Explore/Profile page.
-            // These sub-reels ALWAYS have a back button. The main addictive Reels tab NEVER has a back button.
-            if (desc == "back" || desc == "navigate up" || id.contains("back") || id.contains("action_bar_back")) {
+            // 2. Secondary anchor: Look for the Stories tray at the top.
+            if (desc == "your story") {
                 return true
             }
 
@@ -225,6 +227,9 @@ class BlockerService : AccessibilityService() {
                 node.getChild(i)?.let { queue.add(it) }
             }
         }
+
+        // If we don't see the selected Home tab or the Story tray, we are NOT on the home feed.
+        // This ensures Carousel Reels and Search Reels will correctly return false and get tracked!
         return false
     }
 
