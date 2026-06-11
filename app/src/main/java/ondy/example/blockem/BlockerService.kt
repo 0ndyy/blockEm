@@ -147,20 +147,40 @@ class BlockerService : AccessibilityService() {
         if (root == null) return false
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
-        var hasPublicButtons = false
+
         while (queue.isNotEmpty()) {
             val node = queue.poll() ?: continue
-            val desc = node.contentDescription?.toString()?.lowercase() ?: ""
-            // The flawless IG DM check you liked
-            if (desc == "send" || desc == "share" || desc == "like" || desc == "comment") {
-                hasPublicButtons = true
-                break
+
+            val className = node.className?.toString() ?: ""
+            val text = node.text?.toString()?.trim()?.lowercase() ?: ""
+            val desc = node.contentDescription?.toString()?.trim()?.lowercase() ?: ""
+            val viewId = node.viewIdResourceName?.lowercase() ?: ""
+
+            // 1. Curbox Method: Check for explicit Instagram Direct Message View IDs
+            // The reel viewer inside DMs utilizes these specific internal IDs.
+            if (viewId.contains("direct_") || viewId.contains("thread_") || viewId.contains("message_composer")) {
+                return true
             }
+
+            // 2. The Text Box Method: Normal reels don't have an EditText at the bottom.
+            // If we see an EditText (and it's not the "Add a comment..." box), we are guaranteed to be in a DM.
+            if (className.contains("EditText", ignoreCase = true)) {
+                if (!text.contains("comment") && !desc.contains("comment")) {
+                    return true
+                }
+            }
+
+            // 3. Text content fallbacks (Checking the hint text inside the reply box)
+            if (text == "message..." || text.startsWith("reply to")) {
+                return true
+            }
+
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let { queue.add(it) }
             }
         }
-        return !hasPublicButtons
+
+        return false
     }
 
     private fun isTikTokDm(root: AccessibilityNodeInfo?): Boolean {
