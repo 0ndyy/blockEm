@@ -33,6 +33,7 @@ import androidx.navigation.compose.*
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.launch
 import ondy.example.blockem.ui.theme.BlockEmTheme
+import androidx.compose.foundation.background
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -237,33 +238,172 @@ fun StatsScreen() {
 @Composable
 fun PermissionsScreen(onPermissionsGranted: () -> Unit = {}, isSettingsTab: Boolean = false) {
     val context = LocalContext.current
-    val isAccessibilityGranted = checkAccessibilityPermission(context)
-    val isOverlayGranted = checkOverlayPermission(context)
+    val lifecycleOwner = LocalLifecycleOwner.current
 
-    if (isAccessibilityGranted && isOverlayGranted && !isSettingsTab) {
-        LaunchedEffect(Unit) { onPermissionsGranted() }
+    var currentPage by remember { mutableStateOf(0) }
+    var resumeTrigger by remember { mutableStateOf(0) }
+
+    // This guarantees the UI updates the EXACT millisecond you return from Android Settings
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                // 1. Instantly re-check system permissions
+                val overlayGranted = checkOverlayPermission(context)
+                val accessibilityGranted = checkAccessibilityPermission(context)
+
+                // 2. Instantly auto-advance the page if they granted it
+                if (!isSettingsTab) {
+                    if (overlayGranted && accessibilityGranted) {
+                        onPermissionsGranted()
+                    } else if (overlayGranted && currentPage == 1) {
+                        currentPage = 2
+                    }
+                }
+
+                // 3. Force the UI to refresh (grays out the buttons)
+                resumeTrigger++
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(if (isSettingsTab) "Permissions" else "Setup BlockEm", fontSize = 32.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 32.dp))
+    // Read the permissions dynamically on every refresh
+    val isAccessibilityGranted = remember(resumeTrigger) { checkAccessibilityPermission(context) }
+    val isOverlayGranted = remember(resumeTrigger) { checkOverlayPermission(context) }
 
-        PermissionCard("Accessibility Service", "Required to detect scrolling.", isAccessibilityGranted) {
-            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+    // SETTINGS TAB VIEW
+    if (isSettingsTab) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                "Permissions",
+                fontSize = 32.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.padding(bottom = 32.dp)
+            )
+
+            PermissionCard("Display Over Other Apps", "Required to show the counter.", isOverlayGranted) {
+                context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            PermissionCard("Accessibility Service", "Required to detect scrolling.", isAccessibilityGranted) {
+                context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
         }
-        Spacer(modifier = Modifier.height(16.dp))
-        PermissionCard("Display Over Other Apps", "Required to show the counter.", isOverlayGranted) {
-            context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))
+        return
+    }
+
+    // ONBOARDING VIEW
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        // Top Bar: Progress and Skip Button
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 48.dp, start = 16.dp, end = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val progress = (currentPage + 1) / 3f
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.weight(1f).height(8.dp),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+            )
+            TextButton(onClick = onPermissionsGranted, modifier = Modifier.padding(start = 16.dp)) {
+                Text("Skip All", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        // Page Content
+        Box(
+            modifier = Modifier.fillMaxSize().padding(24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            when (currentPage) {
+                0 -> {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Welcome to BlockEm", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(bottom = 16.dp))
+                        Text(
+                            text = "Take back control of your attention. To make this work seamlessly, we need two quick permissions.",
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.padding(bottom = 48.dp)
+                        )
+                        Button(
+                            onClick = {
+                                if (isOverlayGranted && isAccessibilityGranted) onPermissionsGranted()
+                                else if (isOverlayGranted) currentPage = 2
+                                else currentPage = 1
+                            },
+                            modifier = Modifier.fillMaxWidth().height(50.dp)
+                        ) {
+                            Text("Let's Go", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                1 -> {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Step 1: Overlay", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(bottom = 16.dp))
+                        Text(
+                            text = "We need permission to draw the scroll counter and block screen over your addictive apps.",
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.padding(bottom = 48.dp)
+                        )
+                        PermissionCard("Display Over Other Apps", "Required to show the counter.", isOverlayGranted) {
+                            context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))
+                        }
+                    }
+                }
+                2 -> {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Step 2: Accessibility", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(bottom = 16.dp))
+                        Text(
+                            text = "This allows the engine to securely count your scrolls and detect when you open Reels or Shorts.",
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.padding(bottom = 48.dp)
+                        )
+                        PermissionCard("Accessibility Service", "Required to detect scrolling.", isAccessibilityGranted) {
+                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
 fun PermissionCard(title: String, desc: String, isGranted: Boolean, onClick: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = if (isGranted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isGranted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(title, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            Text(desc, fontSize = 14.sp, modifier = Modifier.padding(vertical = 8.dp))
-            Button(onClick = onClick, enabled = !isGranted, modifier = Modifier.fillMaxWidth()) {
+            Text(title, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+            Text(desc, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 8.dp))
+            Button(
+                onClick = onClick,
+                enabled = !isGranted,
+                modifier = Modifier.fillMaxWidth().height(48.dp)
+            ) {
                 Text(if (isGranted) "Granted" else "Grant Permission")
             }
         }
