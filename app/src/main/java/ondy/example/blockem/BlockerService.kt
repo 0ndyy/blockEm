@@ -21,6 +21,7 @@ class BlockerService : AccessibilityService() {
     private var lastScrollTime = 0L
     private var currentForegroundApp = ""
     private var hasScrolledInApp = false
+    private var isAlreadyInTtDm = false // Fixes the +1 on resume bug
 
     private var currentScrollCount = 0
     private var maxScrolls = 50
@@ -73,23 +74,35 @@ class BlockerService : AccessibilityService() {
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = event.packageName?.toString() ?: ""
             if (pkg.isNotEmpty() && pkg != "ondy.example.blockem") {
-                currentForegroundApp = pkg
-                hasScrolledInApp = false
+                // If switching to a completely new app, reset everything
+                if (currentForegroundApp != pkg) {
+                    currentForegroundApp = pkg
+                    hasScrolledInApp = false
+                    isAlreadyInTtDm = false
+                }
             }
 
-            // NEW: Instantly penalize opening TikTok DMs if the ignore toggle is OFF
+            // INSTANT TT DM OPEN DETECTION
             if (pkg == "com.zhiliaoapp.musically" && ttEnabled) {
-                val shouldIgnoreTtDm = ignoreDmGlobal && ignoreDmTt
-                // If we are NOT ignoring TT DMs, and we see a TT DM on screen:
-                if (!shouldIgnoreTtDm && isTikTokDm(rootInActiveWindow)) {
-                    val currentTime = System.currentTimeMillis()
-                    if (currentTime - lastScrollTime > 800) {
-                        val wasFirst = !hasScrolledInApp
-                        hasScrolledInApp = true
-                        lastScrollTime = currentTime
+                val root = rootInActiveWindow
+                val isSearch = isTikTokSearch(root)
+                val inDm = !isSearch && isTikTokDm(root) // Guarantees search isn't falsely flagged as a DM
 
-                        triggerScrollPenalty(wasFirst)
+                if (inDm) {
+                    val shouldIgnoreTtDm = ignoreDmGlobal && ignoreDmTt
+                    // Apply penalty ONLY if it's a new entry to the DM screen
+                    if (!shouldIgnoreTtDm && !isAlreadyInTtDm) {
+                        val currentTime = System.currentTimeMillis()
+                        if (currentTime - lastScrollTime > 800) {
+                            val wasFirst = !hasScrolledInApp
+                            hasScrolledInApp = true
+                            lastScrollTime = currentTime
+                            triggerScrollPenalty(wasFirst)
+                        }
                     }
+                    isAlreadyInTtDm = true
+                } else {
+                    isAlreadyInTtDm = false
                 }
             }
         }
@@ -121,20 +134,42 @@ class BlockerService : AccessibilityService() {
                 val currentTime = System.currentTimeMillis()
 
                 if (currentTime - lastScrollTime > 800) {
+                    val root = rootInActiveWindow
                     val wasFirst = !hasScrolledInApp
 
                     // Respect ignores
                     if (ignoreDmGlobal) {
-                        if (packageName == "com.zhiliaoapp.musically" && ignoreDmTt && isTikTokDm(rootInActiveWindow)) return
-                        if (packageName == "com.instagram.android" && ignoreDmIg && isIgDmVideo(rootInActiveWindow)) return
+                        if (packageName == "com.zhiliaoapp.musically" && ignoreDmTt) {
+                            // Ensure Search is tracked by ignoring the DM check if we are in Search
+                            if (!isTikTokSearch(root) && isTikTokDm(root)) return
+                        }
+                        if (packageName == "com.instagram.android" && ignoreDmIg && isIgDmVideo(root)) return
                     }
-                    if (packageName == "com.instagram.android" && ignoreIgHome && isIgHomeFeed(rootInActiveWindow)) return
+                    if (packageName == "com.instagram.android" && ignoreIgHome && isIgHomeFeed(root)) return
 
-                    // All clear, apply penalty
+                    // Apply penalty
                     hasScrolledInApp = true
                     lastScrollTime = currentTime
                     triggerScrollPenalty(wasFirst)
                 }
+            }
+        }
+    }
+
+    private fun triggerScrollPenalty(wasFirst: Boolean) {
+        if (ignoreFirstScroll && wasFirst) return
+
+        if (currentScrollCount >= maxScrolls) {
+            launchBlockActivity()
+            return
+        }
+
+        scope.launch {
+            val newTotal = dataStore.incrementScroll()
+            if (newTotal >= maxScrolls) {
+                launchBlockActivity()
+            } else {
+                overlay.flashCount(newTotal)
             }
         }
     }
@@ -146,67 +181,28 @@ class BlockerService : AccessibilityService() {
         startActivity(intent)
     }
 
-    private fun triggerScrollPenalty(wasFirst: Boolean) {
-        // If they have "Ignore First Scroll" toggled on, give them a freebie
-        if (ignoreFirstScroll && wasFirst) return
+    // ==========================================
+    // EXCLUSION & FEED DETECTION METHODS
+    // ==========================================
 
-        // If they are already over the limit, boot them out
-        if (currentScrollCount >= maxScrolls) {
-            launchBlockActivity()
-            return
-        }
-
-        // Otherwise, increment the counter and flash the pill
-        scope.launch {
-            val newTotal = dataStore.incrementScroll()
-            if (newTotal >= maxScrolls) {
-                launchBlockActivity()
-            } else {
-                overlay.flashCount(newTotal)
-            }
-        }
-    }
-
-    private fun isIgDmVideo(root: AccessibilityNodeInfo?): Boolean {
+    private fun isTikTokSearch(root: AccessibilityNodeInfo?): Boolean {
         if (root == null) return false
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
-
         while (queue.isNotEmpty()) {
             val node = queue.poll() ?: continue
-
-            val className = node.className?.toString() ?: ""
-            val text = node.text?.toString()?.trim()?.lowercase() ?: ""
-            val desc = node.contentDescription?.toString()?.trim()?.lowercase() ?: ""
+            val text = node.text?.toString()?.lowercase() ?: ""
+            val desc = node.contentDescription?.toString()?.lowercase() ?: ""
             val viewId = node.viewIdResourceName?.lowercase() ?: ""
 
-            // 1. Precise Curbox Method: Target specific DM text boxes and containers.
-            // This guarantees we don't accidentally match the "action_bar_direct_button" on the Home Feed.
-            if (viewId.contains("direct_reply_to_author") ||
-                viewId.contains("direct_visual_message") ||
-                viewId.contains("message_composer")
-            ) {
+            // If we see the search bar or search tabs, it's definitively the search page
+            if (viewId.contains("search") || desc.contains("search") || text == "search") {
                 return true
             }
-
-            // 2. The Text Box Method: Triggers if there is an EditText that isn't for comments or search.
-            if (className.contains("EditText", ignoreCase = true)) {
-                if (!text.contains("comment") && !desc.contains("comment") &&
-                    !text.contains("search") && !desc.contains("search")) {
-                    return true
-                }
-            }
-
-            // 3. Text content fallbacks
-            if (text == "message..." || text.startsWith("reply to")) {
-                return true
-            }
-
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let { queue.add(it) }
             }
         }
-
         return false
     }
 
@@ -217,8 +213,16 @@ class BlockerService : AccessibilityService() {
         while (queue.isNotEmpty()) {
             val node = queue.poll() ?: continue
             val desc = node.contentDescription?.toString()?.lowercase() ?: ""
-            // The flawless TikTok DM check you liked
+            val viewId = node.viewIdResourceName?.lowercase() ?: ""
+            val text = node.text?.toString()?.lowercase() ?: ""
+
+            // Strict ID check for messages
+            if (viewId.contains("im_") || viewId.contains("chat_room") || viewId.contains("msg_box") || text == "say hi") {
+                return true
+            }
+            // Fallback for older versions: check back button, protected by isTikTokSearch() running first
             if (desc == "back" || desc == "go back") return true
+
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let { queue.add(it) }
             }
@@ -226,7 +230,41 @@ class BlockerService : AccessibilityService() {
         return false
     }
 
-    // POSITIVE CHECK: Detects ONLY the actual Home feed.
+    private fun isIgDmVideo(root: AccessibilityNodeInfo?): Boolean {
+        if (root == null) return false
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        while (queue.isNotEmpty()) {
+            val node = queue.poll() ?: continue
+            val className = node.className?.toString() ?: ""
+            val text = node.text?.toString()?.trim()?.lowercase() ?: ""
+            val desc = node.contentDescription?.toString()?.trim()?.lowercase() ?: ""
+            val viewId = node.viewIdResourceName?.lowercase() ?: ""
+
+            if (viewId.contains("direct_reply_to_author") ||
+                viewId.contains("direct_visual_message") ||
+                viewId.contains("message_composer")) {
+                return true
+            }
+
+            if (className.contains("EditText", ignoreCase = true)) {
+                if (!text.contains("comment") && !desc.contains("comment") &&
+                    !text.contains("search") && !desc.contains("search")) {
+                    return true
+                }
+            }
+
+            if (text == "message..." || text.startsWith("reply to")) {
+                return true
+            }
+
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { queue.add(it) }
+            }
+        }
+        return false
+    }
+
     private fun isIgHomeFeed(root: AccessibilityNodeInfo?): Boolean {
         if (root == null) return false
         val queue = ArrayDeque<AccessibilityNodeInfo>()
@@ -236,13 +274,9 @@ class BlockerService : AccessibilityService() {
             val node = queue.poll() ?: continue
             val desc = node.contentDescription?.toString()?.trim()?.lowercase() ?: ""
 
-            // 1. Check if the "Home" button on the bottom navigation bar is currently selected.
-            // This is the most reliable indicator of the main feed.
             if ((desc.contains("home") || desc.contains("inicio")) && node.isSelected) {
                 return true
             }
-
-            // 2. Secondary anchor: Look for the Stories tray at the top.
             if (desc == "your story") {
                 return true
             }
@@ -251,9 +285,6 @@ class BlockerService : AccessibilityService() {
                 node.getChild(i)?.let { queue.add(it) }
             }
         }
-
-        // If we don't see the selected Home tab or the Story tray, we are NOT on the home feed.
-        // This ensures Carousel Reels and Search Reels will correctly return false and get tracked!
         return false
     }
 
