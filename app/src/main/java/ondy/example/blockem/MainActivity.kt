@@ -9,9 +9,12 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
@@ -21,6 +24,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -29,11 +35,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.navigation.compose.*
 import androidx.navigation.NavHostController
+import androidx.navigation.compose.*
 import kotlinx.coroutines.launch
 import ondy.example.blockem.ui.theme.BlockEmTheme
-import androidx.compose.foundation.background
+import java.time.LocalDate
+import androidx.compose.ui.input.pointer.pointerInput
+import java.time.format.DateTimeFormatter
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -169,26 +181,19 @@ fun ScrollCategoryScreen(onBack: () -> Unit) {
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).padding(16.dp).verticalScroll(scrollState)) {
-
-            // Global Switch
             Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Enable Engine", fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Switch(checked = global, onCheckedChange = { scope.launch { dataStore.setSwitch(SettingsDataStore.GLOBAL_ENABLED, it) } })
             }
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
-            // -- NEW: SCROLL LIMIT PANEL --
             Text("Hard Limit", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
             Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Max Scrolls / Day", fontSize = 16.sp)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    FilledTonalIconButton(onClick = { scope.launch { dataStore.setMaxScrolls(maxOf(1, maxScrolls - 5)) } }) {
-                        Text("-", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    }
+                    FilledTonalIconButton(onClick = { scope.launch { dataStore.setMaxScrolls(maxOf(1, maxScrolls - 5)) } }) { Text("-", fontSize = 20.sp, fontWeight = FontWeight.Bold) }
                     Text("$maxScrolls", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp))
-                    FilledTonalIconButton(onClick = { scope.launch { dataStore.setMaxScrolls(maxScrolls + 5) } }) {
-                        Text("+", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    }
+                    FilledTonalIconButton(onClick = { scope.launch { dataStore.setMaxScrolls(maxScrolls + 5) } }) { Text("+", fontSize = 20.sp, fontWeight = FontWeight.Bold) }
                 }
             }
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
@@ -227,13 +232,184 @@ fun AppSwitchRow(name: String, checked: Boolean, enabled: Boolean, onCheckedChan
 fun StatsScreen() {
     val context = LocalContext.current
     val dataStore = remember { SettingsDataStore(context) }
-    val scrollsToday by dataStore.dailyScrollsFlow.collectAsState(initial = 0)
+    val scope = rememberCoroutineScope()
 
-    Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Text("Scrolls Today", fontSize = 24.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("$scrollsToday", fontSize = 80.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+    val textMeasurer = rememberTextMeasurer()
+
+    val scrollsToday by dataStore.dailyScrollsFlow.collectAsState(initial = 0)
+    val history by dataStore.historyFlow.collectAsState(initial = emptyMap())
+
+    val past30Days = remember { (0..29).map { LocalDate.now().minusDays(it.toLong()).toString() }.reversed() }
+
+    val formattedDates = remember {
+        past30Days.map { dateStr ->
+            try {
+                LocalDate.parse(dateStr).format(DateTimeFormatter.ofPattern("MMM dd"))
+            } catch (e: Exception) { "" }
+        }
+    }
+
+    val graphData = past30Days.map { history[it] ?: 0 }
+
+    val yesterdayDate = LocalDate.now().minusDays(1).toString()
+    val yesterdayScrolls = history[yesterdayDate] ?: 0
+    val diff = scrollsToday - yesterdayScrolls
+
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val barInactiveColor = MaterialTheme.colorScheme.surfaceVariant
+    val tooltipBgColor = MaterialTheme.colorScheme.onSurface
+    val tooltipTextColor = MaterialTheme.colorScheme.surface
+
+    var selectedIndex by remember { mutableStateOf<Int?>(null) }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // RENAMED TO "Overview"
+        Text("Overview", fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 16.dp))
+
+        // MOVED PERCENTAGE UNDERNEATH THE NUMBER
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(vertical = 8.dp)
+        ) {
+            Text("$scrollsToday", fontSize = 80.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+
+            val percentText = when {
+                yesterdayScrolls == 0 && scrollsToday == 0 -> "0%"
+                yesterdayScrolls == 0 && scrollsToday > 0 -> "+100%"
+                diff > 0 -> "+${((diff.toFloat() / yesterdayScrolls) * 100).toInt()}%"
+                else -> "${((diff.toFloat() / yesterdayScrolls) * 100).toInt()}%"
+            }
+
+            val percentColor = when {
+                diff > 0 -> Color(0xFFE53935)
+                diff < 0 -> Color(0xFF43A047)
+                else -> Color.Gray
+            }
+
+            Surface(
+                color = percentColor.copy(alpha = 0.15f),
+                shape = RoundedCornerShape(50),
+                modifier = Modifier.offset(y = (-8).dp) // Tucks it slightly closer to the big number
+            ) {
+                Text(
+                    text = percentText,
+                    color = percentColor,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text("Past 30 Days", fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Start).padding(bottom = 16.dp))
+
+        // FULL SCREEN GRAPH: Replaced .height(200.dp) with .weight(1f)
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(horizontal = 8.dp)
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val isPressed = event.changes.any { it.pressed }
+
+                            if (isPressed) {
+                                val position = event.changes.firstOrNull()?.position
+                                if (position != null) {
+                                    val barWidth = size.width / 30f
+                                    selectedIndex = (position.x / barWidth).toInt().coerceIn(0, 29)
+                                }
+                            } else {
+                                selectedIndex = null
+                            }
+                        }
+                    }
+                }
+        ) {
+            val barWidth = size.width / 30f
+
+            val rawMax = graphData.maxOrNull()?.coerceAtLeast(1) ?: 1
+            val maxScrolls = rawMax * 1.3f
+
+            graphData.forEachIndexed { index, value ->
+                val barHeight = (value.toFloat() / maxScrolls) * size.height
+
+                val color = if (index == 29) primaryColor else barInactiveColor
+                val finalColor = if (selectedIndex != null && selectedIndex != index) color.copy(alpha = 0.4f) else color
+
+                drawRoundRect(
+                    color = finalColor,
+                    topLeft = Offset(x = index * barWidth + (barWidth * 0.1f), y = size.height - barHeight),
+                    size = Size(width = barWidth * 0.8f, height = barHeight),
+                    cornerRadius = CornerRadius(4.dp.toPx())
+                )
+            }
+
+            if (selectedIndex != null) {
+                val index = selectedIndex!!
+                val value = graphData[index]
+                val dateStr = formattedDates[index]
+
+                val centerX = index * barWidth + (barWidth / 2f)
+
+                drawLine(
+                    color = primaryColor,
+                    start = Offset(centerX, 0f),
+                    end = Offset(centerX, size.height),
+                    strokeWidth = 3f,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(15f, 15f), 0f)
+                )
+
+                val textToDraw = "$value scrolls\n$dateStr"
+                val textLayout = textMeasurer.measure(
+                    text = textToDraw,
+                    style = TextStyle(
+                        color = tooltipTextColor,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                )
+
+                val tooltipWidth = textLayout.size.width.toFloat() + 32f
+                val tooltipHeight = textLayout.size.height.toFloat() + 16f
+
+                var tooltipX = centerX + 16f
+                if (tooltipX + tooltipWidth > size.width) {
+                    tooltipX = centerX - tooltipWidth - 16f
+                }
+
+                drawRoundRect(
+                    color = tooltipBgColor,
+                    topLeft = Offset(tooltipX, 0f),
+                    size = Size(tooltipWidth, tooltipHeight),
+                    cornerRadius = CornerRadius(16.dp.toPx())
+                )
+
+                drawText(
+                    textLayoutResult = textLayout,
+                    topLeft = Offset(tooltipX + 16f, 8f)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        TextButton(onClick = { scope.launch { dataStore.injectMockData() } }) {
+            Text("Generate Mock Data", color = Color.Gray)
+        }
     }
 }
+
+
+
+// --- PERMISSIONS TAB & HELPERS ---
 
 @Composable
 fun PermissionsScreen(onPermissionsGranted: () -> Unit = {}, isSettingsTab: Boolean = false) {
@@ -243,24 +419,16 @@ fun PermissionsScreen(onPermissionsGranted: () -> Unit = {}, isSettingsTab: Bool
     var currentPage by remember { mutableStateOf(0) }
     var resumeTrigger by remember { mutableStateOf(0) }
 
-    // This guarantees the UI updates the EXACT millisecond you return from Android Settings
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                // 1. Instantly re-check system permissions
                 val overlayGranted = checkOverlayPermission(context)
                 val accessibilityGranted = checkAccessibilityPermission(context)
 
-                // 2. Instantly auto-advance the page if they granted it
                 if (!isSettingsTab) {
-                    if (overlayGranted && accessibilityGranted) {
-                        onPermissionsGranted()
-                    } else if (overlayGranted && currentPage == 1) {
-                        currentPage = 2
-                    }
+                    if (overlayGranted && accessibilityGranted) onPermissionsGranted()
+                    else if (overlayGranted && currentPage == 1) currentPage = 2
                 }
-
-                // 3. Force the UI to refresh (grays out the buttons)
                 resumeTrigger++
             }
         }
@@ -268,119 +436,47 @@ fun PermissionsScreen(onPermissionsGranted: () -> Unit = {}, isSettingsTab: Bool
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // Read the permissions dynamically on every refresh
     val isAccessibilityGranted = remember(resumeTrigger) { checkAccessibilityPermission(context) }
     val isOverlayGranted = remember(resumeTrigger) { checkOverlayPermission(context) }
 
-    // SETTINGS TAB VIEW
     if (isSettingsTab) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
-                .padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                "Permissions",
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.padding(bottom = 32.dp)
-            )
-
-            PermissionCard("Display Over Other Apps", "Required to show the counter.", isOverlayGranted) {
-                context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))
-            }
+        Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("Permissions", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(bottom = 32.dp))
+            PermissionCard("Display Over Other Apps", "Required to show the counter.", isOverlayGranted) { context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))) }
             Spacer(modifier = Modifier.height(16.dp))
-            PermissionCard("Accessibility Service", "Required to detect scrolling.", isAccessibilityGranted) {
-                context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            }
+            PermissionCard("Accessibility Service", "Required to detect scrolling.", isAccessibilityGranted) { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         }
         return
     }
 
-    // ONBOARDING VIEW
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        // Top Bar: Progress and Skip Button
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 48.dp, start = 16.dp, end = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+    Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Row(modifier = Modifier.fillMaxWidth().padding(top = 48.dp, start = 16.dp, end = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             val progress = (currentPage + 1) / 3f
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier.weight(1f).height(8.dp),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.surfaceVariant,
-            )
-            TextButton(onClick = onPermissionsGranted, modifier = Modifier.padding(start = 16.dp)) {
-                Text("Skip All", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            LinearProgressIndicator(progress = { progress }, modifier = Modifier.weight(1f).height(8.dp), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.surfaceVariant)
+            TextButton(onClick = onPermissionsGranted, modifier = Modifier.padding(start = 16.dp)) { Text("Skip All", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
 
-        // Page Content
-        Box(
-            modifier = Modifier.fillMaxSize().padding(24.dp),
-            contentAlignment = Alignment.Center
-        ) {
+        Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
             when (currentPage) {
                 0 -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Welcome to BlockEm", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(bottom = 16.dp))
-                        Text(
-                            text = "Take back control of your attention. To make this work seamlessly, we need two quick permissions.",
-                            fontSize = 16.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            modifier = Modifier.padding(bottom = 48.dp)
-                        )
-                        Button(
-                            onClick = {
-                                if (isOverlayGranted && isAccessibilityGranted) onPermissionsGranted()
-                                else if (isOverlayGranted) currentPage = 2
-                                else currentPage = 1
-                            },
-                            modifier = Modifier.fillMaxWidth().height(50.dp)
-                        ) {
-                            Text("Let's Go", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        }
+                        Text("Take back control of your attention. To make this work seamlessly, we need two quick permissions.", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(bottom = 48.dp))
+                        Button(onClick = { if (isOverlayGranted && isAccessibilityGranted) onPermissionsGranted() else if (isOverlayGranted) currentPage = 2 else currentPage = 1 }, modifier = Modifier.fillMaxWidth().height(50.dp)) { Text("Let's Go", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
                     }
                 }
                 1 -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Step 1: Overlay", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(bottom = 16.dp))
-                        Text(
-                            text = "We need permission to draw the scroll counter and block screen over your addictive apps.",
-                            fontSize = 16.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            modifier = Modifier.padding(bottom = 48.dp)
-                        )
-                        PermissionCard("Display Over Other Apps", "Required to show the counter.", isOverlayGranted) {
-                            context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))
-                        }
+                        Text("We need permission to draw the scroll counter and block screen over your addictive apps.", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(bottom = 48.dp))
+                        PermissionCard("Display Over Other Apps", "Required to show the counter.", isOverlayGranted) { context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))) }
                     }
                 }
                 2 -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Step 2: Accessibility", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(bottom = 16.dp))
-                        Text(
-                            text = "This allows the engine to securely count your scrolls and detect when you open Reels or Shorts.",
-                            fontSize = 16.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            modifier = Modifier.padding(bottom = 48.dp)
-                        )
-                        PermissionCard("Accessibility Service", "Required to detect scrolling.", isAccessibilityGranted) {
-                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                        }
+                        Text("This allows the engine to securely count your scrolls and detect when you open Reels or Shorts.", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(bottom = 48.dp))
+                        PermissionCard("Accessibility Service", "Required to detect scrolling.", isAccessibilityGranted) { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
                     }
                 }
             }
@@ -390,32 +486,19 @@ fun PermissionsScreen(onPermissionsGranted: () -> Unit = {}, isSettingsTab: Bool
 
 @Composable
 fun PermissionCard(title: String, desc: String, isGranted: Boolean, onClick: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isGranted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-        )
-    ) {
+    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = if (isGranted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(title, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
             Text(desc, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 8.dp))
-            Button(
-                onClick = onClick,
-                enabled = !isGranted,
-                modifier = Modifier.fillMaxWidth().height(48.dp)
-            ) {
-                Text(if (isGranted) "Granted" else "Grant Permission")
-            }
+            Button(onClick = onClick, enabled = !isGranted, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text(if (isGranted) "Granted" else "Grant Permission") }
         }
     }
 }
 
 fun checkAllPermissions(context: Context) = checkAccessibilityPermission(context) && checkOverlayPermission(context)
-
 fun checkAccessibilityPermission(context: Context): Boolean {
     val expectedComponentName = ComponentName(context, BlockerService::class.java).flattenToString()
     val enabledServicesSetting = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
     return enabledServicesSetting.split(':').contains(expectedComponentName)
 }
-
 fun checkOverlayPermission(context: Context): Boolean = Settings.canDrawOverlays(context)
