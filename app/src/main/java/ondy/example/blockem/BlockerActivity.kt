@@ -22,17 +22,30 @@ import androidx.compose.ui.unit.sp
 import ondy.example.blockem.ui.theme.BlockEmTheme
 
 class BlockActivity : ComponentActivity() {
+    private var targetPackage: String = ""
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Grab the package name of the app that triggered the block
+        targetPackage = intent.getStringExtra("PACKAGE_NAME") ?: ""
+
         setContent {
             BlockEmTheme {
-                // If they try to swipe "Back" to escape, kick them to the Home screen
-                BackHandler {
-                    goHome()
-                }
+                BackHandler { goHome() }
 
                 BlockScreenUI(onReturnClicked = {
-                    goHome()
+                    if (targetPackage.isNotEmpty()) {
+                        // Tell the BlockerService to reopen the app and press the Back button
+                        val serviceIntent = Intent(this, BlockerService::class.java).apply {
+                            action = "ACTION_RETURN_APP"
+                            putExtra("PACKAGE_NAME", targetPackage)
+                        }
+                        startService(serviceIntent)
+                    } else {
+                        goHome()
+                    }
+                    finish()
                 })
             }
         }
@@ -44,7 +57,7 @@ class BlockActivity : ComponentActivity() {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
         startActivity(homeIntent)
-        finish() // Kill the activity so it doesn't stay in the "Recent Apps" menu
+        finish()
     }
 }
 

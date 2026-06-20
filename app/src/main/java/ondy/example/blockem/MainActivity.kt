@@ -191,7 +191,7 @@ fun ScrollCategoryScreen(onBack: () -> Unit) {
             Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Max Scrolls / Day", fontSize = 16.sp)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    FilledTonalIconButton(onClick = { scope.launch { dataStore.setMaxScrolls(maxOf(1, maxScrolls - 5)) } }) { Text("-", fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+                    FilledTonalIconButton(onClick = { scope.launch { dataStore.setMaxScrolls(maxOf(0, maxScrolls - 5)) } }) { Text("-", fontSize = 20.sp, fontWeight = FontWeight.Bold) }
                     Text("$maxScrolls", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp))
                     FilledTonalIconButton(onClick = { scope.launch { dataStore.setMaxScrolls(maxScrolls + 5) } }) { Text("+", fontSize = 20.sp, fontWeight = FontWeight.Bold) }
                 }
