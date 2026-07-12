@@ -1,13 +1,16 @@
 package ondy.example.blockem
 
 import android.accessibilityservice.AccessibilityService
-import android.content.Intent
+import android.content.res.Resources
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.ArrayDeque
 
@@ -18,26 +21,14 @@ class BlockerService : AccessibilityService() {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    private var lastScrollTime = 0L
+    // --- NEW ENGINE VARIABLES ---
+    private var lastLikeCount = ""
+    private var currentSection = "UNKNOWN"
+
+    private var pollingJob: Job? = null
     private var currentForegroundApp = ""
-    private var hasScrolledInApp = false
-    private var isAlreadyInTtDm = false // Fixes the +1 on resume bug
 
-    private var currentScrollCount = 0
-    private var maxScrolls = 50
-
-    // Target states
     private var globalEnabled = true
-    private var igEnabled = true
-    private var ttEnabled = true
-    private var ytEnabled = true
-
-    // Exclusion states
-    private var ignoreFirstScroll = true
-    private var ignoreIgHome = true
-    private var ignoreDmGlobal = true
-    private var ignoreDmIg = true
-    private var ignoreDmTt = true
 
     private val targetPackages = setOf(
         "com.zhiliaoapp.musically",
@@ -47,289 +38,277 @@ class BlockerService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-
         dataStore = SettingsDataStore(applicationContext)
         overlay = CounterOverlay(this)
         overlay.attach()
 
-        // Live listeners
-        scope.launch { dataStore.dailyScrollsFlow.collect { currentScrollCount = it } }
-        scope.launch { dataStore.maxScrollsFlow.collect { maxScrolls = it } }
-
         scope.launch { dataStore.globalEnabledFlow.collect { globalEnabled = it } }
-        scope.launch { dataStore.igEnabledFlow.collect { igEnabled = it } }
-        scope.launch { dataStore.ttEnabledFlow.collect { ttEnabled = it } }
-        scope.launch { dataStore.ytEnabledFlow.collect { ytEnabled = it } }
-
-        scope.launch { dataStore.ignoreFirstScrollFlow.collect { ignoreFirstScroll = it } }
-        scope.launch { dataStore.ignoreIgHomeFlow.collect { ignoreIgHome = it } }
-        scope.launch { dataStore.ignoreDmGlobalFlow.collect { ignoreDmGlobal = it } }
-        scope.launch { dataStore.ignoreDmIgFlow.collect { ignoreDmIg = it } }
-        scope.launch { dataStore.ignoreDmTtFlow.collect { ignoreDmTt = it } }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null || !globalEnabled) return
 
-        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            val pkg = event.packageName?.toString() ?: ""
-            if (pkg.isNotEmpty() && pkg != "ondy.example.blockem") {
-                // If switching to a completely new app, reset everything
-                if (currentForegroundApp != pkg) {
-                    currentForegroundApp = pkg
-                    hasScrolledInApp = false
-                    isAlreadyInTtDm = false
-                }
-            }
-
-            // INSTANT TT DM OPEN DETECTION
-            if (pkg == "com.zhiliaoapp.musically" && ttEnabled) {
-                val root = rootInActiveWindow
-                val isSearch = isTikTokSearch(root)
-                val inDm = !isSearch && isTikTokDm(root) // Guarantees search isn't falsely flagged as a DM
-
-                if (inDm) {
-                    val shouldIgnoreTtDm = ignoreDmGlobal && ignoreDmTt
-                    // Apply penalty ONLY if it's a new entry to the DM screen
-                    if (!shouldIgnoreTtDm && !isAlreadyInTtDm) {
-                        val currentTime = System.currentTimeMillis()
-                        if (currentTime - lastScrollTime > 800) {
-                            val wasFirst = !hasScrolledInApp
-                            hasScrolledInApp = true
-                            lastScrollTime = currentTime
-                            triggerScrollPenalty(wasFirst)
-                        }
-                    }
-                    isAlreadyInTtDm = true
-                } else {
-                    isAlreadyInTtDm = false
-                }
+        // 1. Keep track of what app is currently on the screen
+        val pkg = event.packageName?.toString()
+        if (pkg != null && pkg != "ondy.example.blockem" && pkg != "com.android.systemui") {
+            if (currentForegroundApp != pkg) {
+                currentForegroundApp = pkg
+                managePollingLoop()
             }
         }
 
-        val packageName = event.packageName?.toString() ?: return
-        if (packageName !in targetPackages) return
-
-        val isAppEnabled = when (packageName) {
-            "com.zhiliaoapp.musically" -> ttEnabled
-            "com.instagram.android" -> igEnabled
-            "com.google.android.youtube" -> ytEnabled
-            else -> false
-        }
-        if (!isAppEnabled) return
-
-        if (event.eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
-            var scrollNode = event.source
-            if (scrollNode == null || !scrollNode.isScrollable) {
-                scrollNode = findLargestScrollableNode(rootInActiveWindow)
-            }
-            if (scrollNode == null) return
-
-            val className = scrollNode.className?.toString() ?: ""
-            val isPager = className.contains("ViewPager", true) ||
-                    className.contains("RecyclerView", true) ||
-                    className.contains("ScrollView", true)
-
-            if (isPager && isFullScreenVideoFeed(scrollNode)) {
-                val currentTime = System.currentTimeMillis()
-
-                if (currentTime - lastScrollTime > 800) {
-                    val root = rootInActiveWindow
-                    val wasFirst = !hasScrolledInApp
-
-                    // Respect ignores
-                    if (ignoreDmGlobal) {
-                        if (packageName == "com.zhiliaoapp.musically" && ignoreDmTt) {
-                            // Ensure Search is tracked by ignoring the DM check if we are in Search
-                            if (!isTikTokSearch(root) && isTikTokDm(root)) return
-                        }
-                        if (packageName == "com.instagram.android" && ignoreDmIg && isIgDmVideo(root)) return
-                    }
-                    if (packageName == "com.instagram.android" && ignoreIgHome && isIgHomeFeed(root)) return
-
-                    // Apply penalty
-                    hasScrolledInApp = true
-                    lastScrollTime = currentTime
-                    triggerScrollPenalty(wasFirst)
-                }
-            }
+        // Fallback: If Android drops the state change event, ensure the loop runs anyway if a target app sends any event
+        if (pkg in targetPackages && pollingJob?.isActive != true) {
+            currentForegroundApp = pkg ?: ""
+            managePollingLoop()
         }
     }
 
-    private fun triggerScrollPenalty(wasFirst: Boolean) {
-        if (ignoreFirstScroll && wasFirst) return
+    // ==========================================
+    // THE POLLING ENGINE (Fixes Screen Off & Missed Updates)
+    // ==========================================
+    private fun managePollingLoop() {
+        if (currentForegroundApp in targetPackages) {
+            if (pollingJob?.isActive == true) return // Already running
 
-        if (currentScrollCount >= maxScrolls) {
-            launchBlockActivity()
-            return
+            // Start scanning the screen 4 times a second
+            pollingJob = scope.launch {
+                while (isActive) {
+                    val root = try { rootInActiveWindow } catch (e: Exception) { null }
+
+                    if (root != null) {
+                        analyzeScreenState(root, currentForegroundApp)
+                    } else {
+                        // Screen turned off, or app minimized. Reset memory so we don't get stuck!
+                        lastLikeCount = ""
+                        overlay.updateDebugText("Status: Waiting for Screen...")
+                    }
+                    delay(250) // Wait 250ms before checking again (smooth, responsive, saves battery)
+                }
+            }
+        } else {
+            // We left the target apps. Kill the loop.
+            pollingJob?.cancel()
+            lastLikeCount = ""
+            overlay.updateDebugText("Status: Sleeping")
         }
+    }
 
+    private fun analyzeScreenState(root: AccessibilityNodeInfo, pkg: String) {
+        val section = identifySection(root, pkg)
+        val likes = extractOnScreenLikeCount(root, pkg)
+
+        currentSection = section
+
+        // Instantly update the debug UI with the exact state
+        overlay.updateDebugText("App: $pkg\nSec: $section\nLikes: ${likes ?: "Not Found"}")
+
+        // Count scrolls only in Short-form video feeds
+        if (section == "IG_REELS" || section == "TT_FYP" || section == "YT_SHORTS") {
+            if (likes != null) {
+                if (lastLikeCount.isNotEmpty() && likes != lastLikeCount) {
+                    triggerScrollPenalty()
+                }
+                lastLikeCount = likes
+            }
+        } else {
+            // Left the feed, clear the memory so we don't false trigger on return
+            lastLikeCount = ""
+        }
+    }
+
+    private fun triggerScrollPenalty() {
         scope.launch {
             val newTotal = dataStore.incrementScroll()
-            if (newTotal >= maxScrolls) {
-                launchBlockActivity()
-            } else {
-                overlay.flashCount(newTotal)
-            }
+            overlay.flashCount(newTotal)
         }
-    }
-
-    private fun launchBlockActivity() {
-        val intent = Intent(this, BlockActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-        }
-        startActivity(intent)
     }
 
     // ==========================================
-    // EXCLUSION & FEED DETECTION METHODS
+    // HEURISTICS: APP SECTION DETECTION
     // ==========================================
+    private fun identifySection(root: AccessibilityNodeInfo, pkg: String): String {
+        var isIgHome = false
+        var isIgReels = false
+        var isIgDms = false
+        var isIgExplore = false
 
-    private fun isTikTokSearch(root: AccessibilityNodeInfo?): Boolean {
-        if (root == null) return false
+        var isTtFyp = false
+        var isTtInbox = false
+        var isTtDmChat = false
+        var isTtDmVideo = false
+        var isTtProfile = false
+        var isTtSearch = false
+
+        var isYtShorts = false
+
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
-        while (queue.isNotEmpty()) {
+
+        while(queue.isNotEmpty()) {
             val node = queue.poll() ?: continue
             val text = node.text?.toString()?.lowercase() ?: ""
             val desc = node.contentDescription?.toString()?.lowercase() ?: ""
-            val viewId = node.viewIdResourceName?.lowercase() ?: ""
+            val id = node.viewIdResourceName?.lowercase() ?: ""
 
-            // If we see the search bar or search tabs, it's definitively the search page
-            if (viewId.contains("search") || desc.contains("search") || text == "search") {
-                return true
+            if (pkg.contains("instagram")) {
+                if ((desc == "reels" || text == "reels") && node.isSelected) isIgReels = true
+                if ((desc.contains("home") || desc.contains("inicio")) && node.isSelected) isIgHome = true
+                if (desc.contains("direct") || desc.contains("message") || id.contains("message_composer")) isIgDms = true
+                if ((desc == "search and explore" || desc == "explore") && node.isSelected) isIgExplore = true
             }
-            for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { queue.add(it) }
-            }
-        }
-        return false
-    }
+            else if (pkg.contains("musically")) {
+                // Tabs
+                if (text == "for you" && node.isSelected) isTtFyp = true
+                if (text == "inbox" && node.isSelected) isTtInbox = true
+                if (text == "profile" && node.isSelected) isTtProfile = true
 
-    private fun isTikTokDm(root: AccessibilityNodeInfo?): Boolean {
-        if (root == null) return false
-        val queue = ArrayDeque<AccessibilityNodeInfo>()
-        queue.add(root)
-        while (queue.isNotEmpty()) {
-            val node = queue.poll() ?: continue
-            val desc = node.contentDescription?.toString()?.lowercase() ?: ""
-            val viewId = node.viewIdResourceName?.lowercase() ?: ""
-            val text = node.text?.toString()?.lowercase() ?: ""
+                // DM Chat
+                if (id.contains("chat_room") || id.contains("msg_box") || id.contains("im_message")) isTtDmChat = true
+                if (text == "message..." || desc == "message...") isTtDmChat = true
 
-            // Strict ID check for messages
-            if (viewId.contains("im_") || viewId.contains("chat_room") || viewId.contains("msg_box") || text == "say hi") {
-                return true
-            }
-            // Fallback for older versions: check back button, protected by isTikTokSearch() running first
-            if (desc == "back" || desc == "go back") return true
-
-            for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { queue.add(it) }
-            }
-        }
-        return false
-    }
-
-    private fun isIgDmVideo(root: AccessibilityNodeInfo?): Boolean {
-        if (root == null) return false
-        val queue = ArrayDeque<AccessibilityNodeInfo>()
-        queue.add(root)
-        while (queue.isNotEmpty()) {
-            val node = queue.poll() ?: continue
-            val className = node.className?.toString() ?: ""
-            val text = node.text?.toString()?.trim()?.lowercase() ?: ""
-            val desc = node.contentDescription?.toString()?.trim()?.lowercase() ?: ""
-            val viewId = node.viewIdResourceName?.lowercase() ?: ""
-
-            if (viewId.contains("direct_reply_to_author") ||
-                viewId.contains("direct_visual_message") ||
-                viewId.contains("message_composer")) {
-                return true
-            }
-
-            if (className.contains("EditText", ignoreCase = true)) {
-                if (!text.contains("comment") && !desc.contains("comment") &&
-                    !text.contains("search") && !desc.contains("search")) {
-                    return true
+                // DM Video Check: Looks for "message [user]..." input field at the bottom of the video
+                if (text.startsWith("message ") || desc.startsWith("message ")) {
+                    if (!text.contains("comment") && !desc.contains("comment")) {
+                        isTtDmVideo = true
+                    }
                 }
+
+                // Search
+                if (id.contains("search") || text == "search") isTtSearch = true
             }
-
-            if (text == "message..." || text.startsWith("reply to")) {
-                return true
-            }
-
-            for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { queue.add(it) }
-            }
-        }
-        return false
-    }
-
-    private fun isIgHomeFeed(root: AccessibilityNodeInfo?): Boolean {
-        if (root == null) return false
-        val queue = ArrayDeque<AccessibilityNodeInfo>()
-        queue.add(root)
-
-        while (queue.isNotEmpty()) {
-            val node = queue.poll() ?: continue
-            val desc = node.contentDescription?.toString()?.trim()?.lowercase() ?: ""
-
-            if ((desc.contains("home") || desc.contains("inicio")) && node.isSelected) {
-                return true
-            }
-            if (desc == "your story") {
-                return true
+            else if (pkg.contains("youtube")) {
+                if (desc.contains("shorts") && node.isSelected) isYtShorts = true
             }
 
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let { queue.add(it) }
             }
         }
-        return false
-    }
 
-    private fun isFullScreenVideoFeed(scrollNode: AccessibilityNodeInfo): Boolean {
-        val listRect = Rect()
-        scrollNode.getBoundsInScreen(listRect)
-        val screenHeight = resources.displayMetrics.heightPixels
-        if (listRect.height() < screenHeight * 0.6) return false
-        for (i in 0 until scrollNode.childCount) {
-            val child = scrollNode.getChild(i) ?: continue
-            val childRect = Rect()
-            child.getBoundsInScreen(childRect)
-            if (childRect.height() >= listRect.height() * 0.80) return true
+        return when {
+            isIgReels -> "IG_REELS"
+            isIgHome -> "IG_HOME"
+            isIgDms -> "IG_DMS"
+            isIgExplore -> "IG_EXPLORE"
+
+            isTtDmVideo -> "TT_DM_VIDEO"
+            isTtDmChat -> "TT_DM_CHAT"
+            isTtInbox -> "TT_INBOX"
+            isTtSearch -> "TT_SEARCH"
+            isTtProfile -> "TT_PROFILE"
+            isTtFyp -> "TT_FYP"
+
+            isYtShorts -> "YT_SHORTS"
+
+            pkg.contains("instagram") -> "IG_UNKNOWN"
+            pkg.contains("musically") -> "TT_UNKNOWN"
+            pkg.contains("youtube") -> "YT_UNKNOWN"
+            else -> "UNKNOWN"
         }
-        return false
     }
 
-    private fun findLargestScrollableNode(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
-        if (root == null) return null
+    // ==========================================
+    // HEURISTICS: LIKE COUNT EXTRACTION (Fixes Prev/Next Bug)
+    // ==========================================
+    private fun extractOnScreenLikeCount(root: AccessibilityNodeInfo, pkg: String): String? {
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
-        var largest: AccessibilityNodeInfo? = null
-        var maxArea = 0
+
+        // Get actual physical screen dimensions
+        val screenHeight = Resources.getSystem().displayMetrics.heightPixels
+        val screenCenterY = screenHeight / 2
+
+        var bestLikeCountText: String? = null
+        var minDistanceToCenter = Int.MAX_VALUE
+
         while (queue.isNotEmpty()) {
             val node = queue.poll() ?: continue
-            if (node.isScrollable) {
-                val rect = Rect()
-                node.getBoundsInScreen(rect)
-                val area = rect.width() * rect.height()
-                if (area > maxArea) {
-                    maxArea = area
-                    largest = node
+            val text = node.text?.toString() ?: ""
+            val desc = node.contentDescription?.toString() ?: ""
+            val id = node.viewIdResourceName?.lowercase() ?: ""
+
+            var foundLikeText: String? = null
+
+            try {
+                // 1. YouTube Shorts
+                if (pkg.contains("youtube")) {
+                    if (desc.contains("like this video along with", ignoreCase = true)) {
+                        val match = Regex("\\d+[\\d,]*").find(desc)
+                        if (match != null) foundLikeText = match.value
+                    } else if (id.contains("like_button")) {
+                        if (text.isNotEmpty() && text.any { it.isDigit() }) foundLikeText = text
+                    }
                 }
-            }
+
+                // 2. TikTok FYP
+                else if (pkg.contains("musically")) {
+                    if (id.contains("digg_count") || id.contains("like_text")) {
+                        if (text.isNotEmpty() && text.any { it.isDigit() }) foundLikeText = text
+                    } else if (desc.contains("like", ignoreCase = true) && desc.any { it.isDigit() }) {
+                        foundLikeText = desc
+                    }
+                }
+
+                // 3. Instagram Reels
+                else if (pkg.contains("instagram")) {
+                    if (id.contains("like_count") || id.contains("like_button")) {
+                        if (text.isNotEmpty() && text.any { it.isDigit() }) foundLikeText = text
+                    } else if (desc.equals("like", ignoreCase = true) || desc.equals("liked", ignoreCase = true)) {
+                        if (text.isNotEmpty() && text.any { it.isDigit() }) {
+                            foundLikeText = text
+                        } else {
+                            // Extract text from sibling node
+                            val parent = node.parent
+                            if (parent != null) {
+                                for (i in 0 until parent.childCount) {
+                                    val sibling = parent.getChild(i)
+                                    val sibText = sibling?.text?.toString() ?: ""
+                                    if (sibText.isNotEmpty() && sibText.any { it.isDigit() }) {
+                                        foundLikeText = sibText
+                                        break
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // --- THE SECRET SAUCE: VISIBILITY DISTANCE CHECK ---
+                // If we found a string that looks like a like count, we must ensure it's ACTUALLY on screen
+                if (foundLikeText != null) {
+                    val rect = Rect()
+                    node.getBoundsInScreen(rect)
+
+                    // 1. Is it physically on the screen? (Eliminates hidden pre-loaded videos entirely)
+                    if (rect.bottom > 0 && rect.top < screenHeight) {
+
+                        // 2. How close is this button to the center of the screen?
+                        val distance = Math.abs(screenCenterY - rect.centerY())
+
+                        // 3. If it's the closest one we've found so far, it is the active video!
+                        if (distance < minDistanceToCenter) {
+                            minDistanceToCenter = distance
+                            bestLikeCountText = foundLikeText
+                        }
+                    }
+                }
+
+            } catch (e: Exception) {}
+
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let { queue.add(it) }
             }
         }
-        return largest
+
+        return bestLikeCountText
     }
 
     override fun onInterrupt() {}
 
     override fun onDestroy() {
         super.onDestroy()
+        pollingJob?.cancel()
         overlay.detach()
     }
 }

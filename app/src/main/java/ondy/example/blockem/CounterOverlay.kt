@@ -2,19 +2,20 @@ package ondy.example.blockem
 
 import android.content.Context
 import android.graphics.PixelFormat
-import android.view.Gravity
 import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
@@ -45,6 +46,7 @@ class CounterOverlay(private val context: Context) {
 
     private val countFlow = MutableStateFlow(0)
     private val isVisibleFlow = MutableStateFlow(false)
+    private val debugTextFlow = MutableStateFlow("Initializing Debug...") // NEW: Debug text state
 
     private val scope = CoroutineScope(Dispatchers.Main)
     private var hideJob: Job? = null
@@ -52,19 +54,16 @@ class CounterOverlay(private val context: Context) {
     fun attach() {
         if (composeView != null) return
 
+        // Changed to MATCH_PARENT to allow easy multi-placement of Compose elements over the screen
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            // FLAG_NOT_TOUCHABLE ensures the overlay never steals your touches
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                     WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
             PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            y = 150
-        }
+        )
 
         val lifecycleOwner = CounterLifecycleOwner()
         lifecycleOwner.start()
@@ -77,23 +76,45 @@ class CounterOverlay(private val context: Context) {
             setContent {
                 val count by countFlow.collectAsState()
                 val isVisible by isVisibleFlow.collectAsState()
+                val debugText by debugTextFlow.collectAsState()
 
-                AnimatedVisibility(
-                    visible = isVisible,
-                    enter = fadeIn(),
-                    exit = fadeOut()
-                ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+
+                    // --- ALWAYS VISIBLE DEBUG TEXT ---
                     Box(
                         modifier = Modifier
-                            .background(Color.Black.copy(alpha = 0.8f), RoundedCornerShape(50))
-                            .padding(horizontal = 24.dp, vertical = 12.dp)
+                            .align(Alignment.TopStart)
+                            .padding(top = 40.dp, start = 16.dp)
+                            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                            .padding(12.dp)
                     ) {
                         Text(
-                            text = "Scrolls: $count",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
+                            text = debugText,
+                            color = Color.Green,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 12.sp
                         )
+                    }
+
+                    // --- FLASHING SCROLL COUNTER ---
+                    AnimatedVisibility(
+                        visible = isVisible,
+                        modifier = Modifier.align(Alignment.TopCenter).padding(top = 100.dp),
+                        enter = fadeIn(),
+                        exit = fadeOut()
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .background(Color.Black.copy(alpha = 0.8f), RoundedCornerShape(50))
+                                .padding(horizontal = 24.dp, vertical = 12.dp)
+                        ) {
+                            Text(
+                                text = "Scrolls: $count",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                        }
                     }
                 }
             }
@@ -102,7 +123,10 @@ class CounterOverlay(private val context: Context) {
         windowManager.addView(composeView, params)
     }
 
-    // Tells Compose to update the number, fade in, wait 1.5s, and fade out
+    fun updateDebugText(text: String) {
+        debugTextFlow.value = text
+    }
+
     fun flashCount(newCount: Int) {
         countFlow.value = newCount
         isVisibleFlow.value = true
