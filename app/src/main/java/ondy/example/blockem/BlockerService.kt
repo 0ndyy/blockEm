@@ -14,6 +14,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.ArrayDeque
 
+data class VideoMetrics(val likes: String?, val comments: String?)
+
 class BlockerService : AccessibilityService() {
 
     private lateinit var overlay: CounterOverlay
@@ -21,8 +23,8 @@ class BlockerService : AccessibilityService() {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    // --- NEW ENGINE VARIABLES ---
     private var lastLikeCount = ""
+    private var lastCommentCount = ""
     private var currentSection = "UNKNOWN"
 
     private var pollingJob: Job? = null
@@ -96,24 +98,41 @@ class BlockerService : AccessibilityService() {
 
     private fun analyzeScreenState(root: AccessibilityNodeInfo, pkg: String) {
         val section = identifySection(root, pkg)
-        val likes = extractOnScreenLikeCount(root, pkg)
+        val metrics = extractVideoMetrics(root, pkg) // We are replacing the old extract function
 
         currentSection = section
+        val likes = metrics.likes
+        val comments = metrics.comments
 
-        // Instantly update the debug UI with the exact state
-        overlay.updateDebugText("App: $pkg\nSec: $section\nLikes: ${likes ?: "Not Found"}")
+        // Instantly update the debug UI to show both metrics
+        overlay.updateDebugText("App: $pkg\nSec: $section\nL: ${likes ?: "Nil"} | C: ${comments ?: "Nil"}")
 
         // Count scrolls only in Short-form video feeds
         if (section == "IG_REELS" || section == "TT_FYP" || section == "YT_SHORTS") {
-            if (likes != null) {
-                if (lastLikeCount.isNotEmpty() && likes != lastLikeCount) {
-                    triggerScrollPenalty()
-                }
-                lastLikeCount = likes
+            var isScroll = false
+
+            // Did the likes change? (Only triggers if we had a previous like count and a current one)
+            if (likes != null && lastLikeCount.isNotEmpty() && likes != lastLikeCount) {
+                isScroll = true
             }
+
+            // Did the comments change? (The Fallback: covers us if the like button disappears)
+            if (comments != null && lastCommentCount.isNotEmpty() && comments != lastCommentCount) {
+                isScroll = true
+            }
+
+            if (isScroll) {
+                triggerScrollPenalty()
+            }
+
+            // Always save current state for the next 250ms check
+            lastLikeCount = likes ?: ""
+            lastCommentCount = comments ?: ""
+
         } else {
-            // Left the feed, clear the memory so we don't false trigger on return
+            // Left the feed, clear memory
             lastLikeCount = ""
+            lastCommentCount = ""
         }
     }
 
@@ -209,18 +228,19 @@ class BlockerService : AccessibilityService() {
     }
 
     // ==========================================
-    // HEURISTICS: LIKE COUNT EXTRACTION (Fixes Prev/Next Bug)
+    // HEURISTICS: VIDEO METRICS EXTRACTION
     // ==========================================
-    private fun extractOnScreenLikeCount(root: AccessibilityNodeInfo, pkg: String): String? {
+    private fun extractVideoMetrics(root: AccessibilityNodeInfo, pkg: String): VideoMetrics {
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
 
-        // Get actual physical screen dimensions
-        val screenHeight = Resources.getSystem().displayMetrics.heightPixels
+        val screenHeight = android.content.res.Resources.getSystem().displayMetrics.heightPixels
         val screenCenterY = screenHeight / 2
 
-        var bestLikeCountText: String? = null
-        var minDistanceToCenter = Int.MAX_VALUE
+        var bestLikeCount: String? = null
+        var bestCommentCount: String? = null
+        var minDistanceLikes = Int.MAX_VALUE
+        var minDistanceComments = Int.MAX_VALUE
 
         while (queue.isNotEmpty()) {
             val node = queue.poll() ?: continue
@@ -228,68 +248,90 @@ class BlockerService : AccessibilityService() {
             val desc = node.contentDescription?.toString() ?: ""
             val id = node.viewIdResourceName?.lowercase() ?: ""
 
-            var foundLikeText: String? = null
+            var foundLike: String? = null
+            var foundComment: String? = null
 
             try {
                 // 1. YouTube Shorts
                 if (pkg.contains("youtube")) {
                     if (desc.contains("like this video along with", ignoreCase = true)) {
-                        val match = Regex("\\d+[\\d,]*").find(desc)
-                        if (match != null) foundLikeText = match.value
+                        foundLike = Regex("\\d+[\\d,]*").find(desc)?.value
                     } else if (id.contains("like_button")) {
-                        if (text.isNotEmpty() && text.any { it.isDigit() }) foundLikeText = text
+                        if (text.isNotEmpty() && text.any { it.isDigit() }) foundLike = text
+                    }
+
+                    if (desc.contains("comment", ignoreCase = true) && desc.any { it.isDigit() }) {
+                        foundComment = Regex("\\d+[\\d,KkMm]*").find(desc)?.value ?: desc
                     }
                 }
 
                 // 2. TikTok FYP
                 else if (pkg.contains("musically")) {
+                    // Likes
                     if (id.contains("digg_count") || id.contains("like_text")) {
-                        if (text.isNotEmpty() && text.any { it.isDigit() }) foundLikeText = text
+                        if (text.isNotEmpty() && text.any { it.isDigit() }) foundLike = text
                     } else if (desc.contains("like", ignoreCase = true) && desc.any { it.isDigit() }) {
-                        foundLikeText = desc
+                        foundLike = desc
+                    }
+                    // Comments
+                    if (id.contains("comment_text") || id.contains("comment_count")) {
+                        if (text.isNotEmpty() && text.any { it.isDigit() }) foundComment = text
+                    } else if (desc.contains("comment", ignoreCase = true) && desc.any { it.isDigit() }) {
+                        foundComment = desc
                     }
                 }
 
                 // 3. Instagram Reels
                 else if (pkg.contains("instagram")) {
+                    // Likes
                     if (id.contains("like_count") || id.contains("like_button")) {
-                        if (text.isNotEmpty() && text.any { it.isDigit() }) foundLikeText = text
+                        if (text.isNotEmpty() && text.any { it.isDigit() }) foundLike = text
                     } else if (desc.equals("like", ignoreCase = true) || desc.equals("liked", ignoreCase = true)) {
                         if (text.isNotEmpty() && text.any { it.isDigit() }) {
-                            foundLikeText = text
+                            foundLike = text
                         } else {
-                            // Extract text from sibling node
                             val parent = node.parent
                             if (parent != null) {
                                 for (i in 0 until parent.childCount) {
-                                    val sibling = parent.getChild(i)
-                                    val sibText = sibling?.text?.toString() ?: ""
+                                    val sibText = parent.getChild(i)?.text?.toString() ?: ""
                                     if (sibText.isNotEmpty() && sibText.any { it.isDigit() }) {
-                                        foundLikeText = sibText
+                                        foundLike = sibText
                                         break
                                     }
                                 }
                             }
                         }
                     }
+                    // Comments
+                    if (id.contains("comment_count") || id.contains("comment_button")) {
+                        if (text.isNotEmpty() && text.any { it.isDigit() }) foundComment = text
+                    } else if (desc.contains("comment", ignoreCase = true) && desc.any { it.isDigit() }) {
+                        foundComment = desc
+                    }
                 }
 
-                // --- THE SECRET SAUCE: VISIBILITY DISTANCE CHECK ---
-                // If we found a string that looks like a like count, we must ensure it's ACTUALLY on screen
-                if (foundLikeText != null) {
-                    val rect = Rect()
+                // Distance check for Likes
+                if (foundLike != null) {
+                    val rect = android.graphics.Rect()
                     node.getBoundsInScreen(rect)
-
-                    // 1. Is it physically on the screen? (Eliminates hidden pre-loaded videos entirely)
                     if (rect.bottom > 0 && rect.top < screenHeight) {
-
-                        // 2. How close is this button to the center of the screen?
                         val distance = Math.abs(screenCenterY - rect.centerY())
+                        if (distance < minDistanceLikes) {
+                            minDistanceLikes = distance
+                            bestLikeCount = foundLike
+                        }
+                    }
+                }
 
-                        // 3. If it's the closest one we've found so far, it is the active video!
-                        if (distance < minDistanceToCenter) {
-                            minDistanceToCenter = distance
-                            bestLikeCountText = foundLikeText
+                // Distance check for Comments
+                if (foundComment != null) {
+                    val rect = android.graphics.Rect()
+                    node.getBoundsInScreen(rect)
+                    if (rect.bottom > 0 && rect.top < screenHeight) {
+                        val distance = Math.abs(screenCenterY - rect.centerY())
+                        if (distance < minDistanceComments) {
+                            minDistanceComments = distance
+                            bestCommentCount = foundComment
                         }
                     }
                 }
@@ -301,7 +343,7 @@ class BlockerService : AccessibilityService() {
             }
         }
 
-        return bestLikeCountText
+        return VideoMetrics(bestLikeCount, bestCommentCount)
     }
 
     override fun onInterrupt() {}
