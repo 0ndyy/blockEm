@@ -234,7 +234,9 @@ class BlockerService : AccessibilityService() {
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
 
-        val screenHeight = android.content.res.Resources.getSystem().displayMetrics.heightPixels
+        val displayMetrics = android.content.res.Resources.getSystem().displayMetrics
+        val screenHeight = displayMetrics.heightPixels
+        val screenWidth = displayMetrics.widthPixels // NEW
         val screenCenterY = screenHeight / 2
 
         var bestLikeCount: String? = null
@@ -265,7 +267,7 @@ class BlockerService : AccessibilityService() {
                     }
                 }
 
-                // 2. TikTok FYP
+                // 2. TikTok FYP & Following
                 else if (pkg.contains("musically")) {
                     // Likes
                     if (id.contains("digg_count") || id.contains("like_text")) {
@@ -310,11 +312,11 @@ class BlockerService : AccessibilityService() {
                     }
                 }
 
-                // Distance check for Likes
+                // Distance check for Likes (NOW INCLUDES HORIZONTAL CHECK)
                 if (foundLike != null) {
                     val rect = android.graphics.Rect()
                     node.getBoundsInScreen(rect)
-                    if (rect.bottom > 0 && rect.top < screenHeight) {
+                    if (rect.bottom > 0 && rect.top < screenHeight && rect.right > 0 && rect.left < screenWidth) {
                         val distance = Math.abs(screenCenterY - rect.centerY())
                         if (distance < minDistanceLikes) {
                             minDistanceLikes = distance
@@ -323,11 +325,11 @@ class BlockerService : AccessibilityService() {
                     }
                 }
 
-                // Distance check for Comments
+                // Distance check for Comments (NOW INCLUDES HORIZONTAL CHECK)
                 if (foundComment != null) {
                     val rect = android.graphics.Rect()
                     node.getBoundsInScreen(rect)
-                    if (rect.bottom > 0 && rect.top < screenHeight) {
+                    if (rect.bottom > 0 && rect.top < screenHeight && rect.right > 0 && rect.left < screenWidth) {
                         val distance = Math.abs(screenCenterY - rect.centerY())
                         if (distance < minDistanceComments) {
                             minDistanceComments = distance
@@ -345,6 +347,7 @@ class BlockerService : AccessibilityService() {
 
         return VideoMetrics(bestLikeCount, bestCommentCount)
     }
+
 
     override fun onInterrupt() {}
 
