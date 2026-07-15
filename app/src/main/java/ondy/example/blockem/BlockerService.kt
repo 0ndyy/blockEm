@@ -98,42 +98,33 @@ class BlockerService : AccessibilityService() {
 
     private fun analyzeScreenState(root: AccessibilityNodeInfo, pkg: String) {
         val section = identifySection(root, pkg)
-        val metrics = extractVideoMetrics(root, pkg) // We are replacing the old extract function
+        val metrics = extractVideoMetrics(root, pkg)
 
         currentSection = section
         val likes = metrics.likes
         val comments = metrics.comments
 
-        // Instantly update the debug UI to show both metrics
         overlay.updateDebugText("App: $pkg\nSec: $section\nL: ${likes ?: "Nil"} | C: ${comments ?: "Nil"}")
 
-        // Count scrolls only in Short-form video feeds
-        if (section == "IG_REELS" || section == "TT_FYP" || section == "YT_SHORTS") {
-            var isScroll = false
+        var isScroll = false
 
-            // Did the likes change? (Only triggers if we had a previous like count and a current one)
-            if (likes != null && lastLikeCount.isNotEmpty() && likes != lastLikeCount) {
-                isScroll = true
-            }
-
-            // Did the comments change? (The Fallback: covers us if the like button disappears)
-            if (comments != null && lastCommentCount.isNotEmpty() && comments != lastCommentCount) {
-                isScroll = true
-            }
-
-            if (isScroll) {
-                triggerScrollPenalty()
-            }
-
-            // Always save current state for the next 250ms check
-            lastLikeCount = likes ?: ""
-            lastCommentCount = comments ?: ""
-
-        } else {
-            // Left the feed, clear memory
-            lastLikeCount = ""
-            lastCommentCount = ""
+        // Not Found ("") -> Value  OR  Value1 -> Value2
+        if (likes != null && likes != lastLikeCount) {
+            isScroll = true
         }
+
+        // Fallback: Not Found ("") -> Value  OR  Value1 -> Value2
+        if (comments != null && comments != lastCommentCount) {
+            isScroll = true
+        }
+
+        if (isScroll) {
+            triggerScrollPenalty()
+        }
+
+        // Value -> Not Found will just save "" (Null) into the memory and not trigger a scroll
+        lastLikeCount = likes ?: ""
+        lastCommentCount = comments ?: ""
     }
 
     private fun triggerScrollPenalty() {
