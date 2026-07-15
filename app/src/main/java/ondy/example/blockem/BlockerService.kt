@@ -142,8 +142,12 @@ class BlockerService : AccessibilityService() {
         var isIgReels = false
         var isIgDms = false
         var isIgExplore = false
+        var isIgComments = false
+        var isIgDmFeed = false
+        var isIgDmVideo = false
 
         var isTtFyp = false
+        var isTtFollowing = false
         var isTtInbox = false
         var isTtDmChat = false
         var isTtDmVideo = false
@@ -164,27 +168,35 @@ class BlockerService : AccessibilityService() {
             if (pkg.contains("instagram")) {
                 if ((desc == "reels" || text == "reels") && node.isSelected) isIgReels = true
                 if ((desc.contains("home") || desc.contains("inicio")) && node.isSelected) isIgHome = true
-                if (desc.contains("direct") || desc.contains("message") || id.contains("message_composer")) isIgDms = true
                 if ((desc == "search and explore" || desc == "explore") && node.isSelected) isIgExplore = true
+
+                // 1. Comment Section Detection
+                if (text.equals("comments", ignoreCase = true) || id.contains("comment_thread")) isIgComments = true
+
+                // 2. DM Feed Detection (Endless scrolling sent from chat)
+                if (text.equals("send to chat", ignoreCase = true) || desc.equals("send to chat", ignoreCase = true)) isIgDmFeed = true
+
+                // 3. DM Video Detection (Single video opened in chat)
+                if (text.startsWith("reply to ", ignoreCase = true) || desc.startsWith("reply to ", ignoreCase = true)) isIgDmVideo = true
+
+                // DMs Base (Will be overridden if we are actually in a DM Feed or DM Video)
+                if (desc.contains("direct") || desc.contains("message") || id.contains("message_composer")) isIgDms = true
             }
             else if (pkg.contains("musically")) {
-                // Tabs
                 if (text == "for you" && node.isSelected) isTtFyp = true
+                if (text == "following" && node.isSelected) isTtFollowing = true
                 if (text == "inbox" && node.isSelected) isTtInbox = true
                 if (text == "profile" && node.isSelected) isTtProfile = true
 
-                // DM Chat
                 if (id.contains("chat_room") || id.contains("msg_box") || id.contains("im_message")) isTtDmChat = true
                 if (text == "message..." || desc == "message...") isTtDmChat = true
 
-                // DM Video Check: Looks for "message [user]..." input field at the bottom of the video
                 if (text.startsWith("message ") || desc.startsWith("message ")) {
                     if (!text.contains("comment") && !desc.contains("comment")) {
                         isTtDmVideo = true
                     }
                 }
 
-                // Search
                 if (id.contains("search") || text == "search") isTtSearch = true
             }
             else if (pkg.contains("youtube")) {
@@ -196,7 +208,11 @@ class BlockerService : AccessibilityService() {
             }
         }
 
+        // Return order dictates priority!
         return when {
+            isIgComments -> "IG_COMMENTS"
+            isIgDmVideo -> "IG_DM_VIDEO"
+            isIgDmFeed -> "IG_DM_FEED"
             isIgReels -> "IG_REELS"
             isIgHome -> "IG_HOME"
             isIgDms -> "IG_DMS"
@@ -207,6 +223,7 @@ class BlockerService : AccessibilityService() {
             isTtInbox -> "TT_INBOX"
             isTtSearch -> "TT_SEARCH"
             isTtProfile -> "TT_PROFILE"
+            isTtFollowing -> "TT_FOLLOWING"
             isTtFyp -> "TT_FYP"
 
             isYtShorts -> "YT_SHORTS"
@@ -227,7 +244,7 @@ class BlockerService : AccessibilityService() {
 
         val displayMetrics = android.content.res.Resources.getSystem().displayMetrics
         val screenHeight = displayMetrics.heightPixels
-        val screenWidth = displayMetrics.widthPixels // NEW
+        val screenWidth = displayMetrics.widthPixels
         val screenCenterY = screenHeight / 2
 
         var bestLikeCount: String? = null
@@ -260,13 +277,11 @@ class BlockerService : AccessibilityService() {
 
                 // 2. TikTok FYP & Following
                 else if (pkg.contains("musically")) {
-                    // Likes
                     if (id.contains("digg_count") || id.contains("like_text")) {
                         if (text.isNotEmpty() && text.any { it.isDigit() }) foundLike = text
                     } else if (desc.contains("like", ignoreCase = true) && desc.any { it.isDigit() }) {
                         foundLike = desc
                     }
-                    // Comments
                     if (id.contains("comment_text") || id.contains("comment_count")) {
                         if (text.isNotEmpty() && text.any { it.isDigit() }) foundComment = text
                     } else if (desc.contains("comment", ignoreCase = true) && desc.any { it.isDigit() }) {
@@ -274,10 +289,10 @@ class BlockerService : AccessibilityService() {
                     }
                 }
 
-                // 3. Instagram Reels
+                // 3. Instagram Reels & Home
                 else if (pkg.contains("instagram")) {
-                    // Likes
-                    if (id.contains("like_count") || id.contains("like_button")) {
+                    // Likes (Added !id.contains("comment") to ignore likes inside comment sections)
+                    if ((id.contains("like_count") || id.contains("like_button")) && !id.contains("comment")) {
                         if (text.isNotEmpty() && text.any { it.isDigit() }) foundLike = text
                     } else if (desc.equals("like", ignoreCase = true) || desc.equals("liked", ignoreCase = true)) {
                         if (text.isNotEmpty() && text.any { it.isDigit() }) {
@@ -294,16 +309,26 @@ class BlockerService : AccessibilityService() {
                                 }
                             }
                         }
+                    } else if (desc.contains("like", ignoreCase = true) && desc.any { it.isDigit() }) {
+                        // Carousel Fix: Extracts ONLY the like amount from long descriptions
+                        val match = Regex("(?i)(\\d+[\\d,kKmM]*)\\s*likes?").find(desc)
+                        if (match != null) foundLike = match.value
                     }
-                    // Comments
-                    if (id.contains("comment_count") || id.contains("comment_button")) {
+
+                    // Comments (Added !id.contains("like") to avoid cross-contamination)
+                    if ((id.contains("comment_count") || id.contains("comment_button")) && !id.contains("like")) {
                         if (text.isNotEmpty() && text.any { it.isDigit() }) foundComment = text
                     } else if (desc.contains("comment", ignoreCase = true) && desc.any { it.isDigit() }) {
-                        foundComment = desc
+                        // Carousel Fix: Extracts ONLY the comment amount
+                        val match = Regex("(?i)(\\d+[\\d,kKmM]*)\\s*comments?").find(desc)
+                        if (match != null) {
+                            foundComment = match.value
+                        } else {
+                            foundComment = desc
+                        }
                     }
                 }
 
-                // Distance check for Likes (NOW INCLUDES HORIZONTAL CHECK)
                 if (foundLike != null) {
                     val rect = android.graphics.Rect()
                     node.getBoundsInScreen(rect)
@@ -316,7 +341,6 @@ class BlockerService : AccessibilityService() {
                     }
                 }
 
-                // Distance check for Comments (NOW INCLUDES HORIZONTAL CHECK)
                 if (foundComment != null) {
                     val rect = android.graphics.Rect()
                     node.getBoundsInScreen(rect)
