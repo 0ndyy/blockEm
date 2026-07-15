@@ -140,7 +140,6 @@ class BlockerService : AccessibilityService() {
     private fun identifySection(root: AccessibilityNodeInfo, pkg: String): String {
         var isIgHome = false
         var isIgReels = false
-        var isIgDms = false
         var isIgExplore = false
         var isIgComments = false
         var isIgDmFeed = false
@@ -166,9 +165,12 @@ class BlockerService : AccessibilityService() {
             val id = node.viewIdResourceName?.lowercase() ?: ""
 
             if (pkg.contains("instagram")) {
-                if ((desc == "reels" || text == "reels") && node.isSelected) isIgReels = true
+                // Fullscreen detection
+                if (desc == "reels" || text == "reels") isIgReels = true
+                if (desc == "search and explore" || text == "search and explore" || desc == "explore" || text == "explore") isIgExplore = true
+
+                // Master Override: Keeps node.isSelected. If the tab bar is visible, this wins.
                 if ((desc.contains("home") || desc.contains("inicio")) && node.isSelected) isIgHome = true
-                if ((desc == "search and explore" || desc == "explore") && node.isSelected) isIgExplore = true
 
                 // 1. Comment Section Detection
                 if (text.equals("comments", ignoreCase = true) || id.contains("comment_thread")) isIgComments = true
@@ -179,8 +181,7 @@ class BlockerService : AccessibilityService() {
                 // 3. DM Video Detection (Single video opened in chat)
                 if (text.startsWith("reply to ", ignoreCase = true) || desc.startsWith("reply to ", ignoreCase = true)) isIgDmVideo = true
 
-                // DMs Base (Will be overridden if we are actually in a DM Feed or DM Video)
-                if (desc.contains("direct") || desc.contains("message") || id.contains("message_composer")) isIgDms = true
+                // (General IG_DMS detection completely removed)
             }
             else if (pkg.contains("musically")) {
                 if (text == "for you" && node.isSelected) isTtFyp = true
@@ -213,9 +214,8 @@ class BlockerService : AccessibilityService() {
             isIgComments -> "IG_COMMENTS"
             isIgDmVideo -> "IG_DM_VIDEO"
             isIgDmFeed -> "IG_DM_FEED"
-            isIgReels -> "IG_REELS"
             isIgHome -> "IG_HOME"
-            isIgDms -> "IG_DMS"
+            isIgReels -> "IG_REELS"
             isIgExplore -> "IG_EXPLORE"
 
             isTtDmVideo -> "TT_DM_VIDEO"
