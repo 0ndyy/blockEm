@@ -25,12 +25,14 @@ class BlockerService : AccessibilityService() {
 
     private var lastLikeCount = ""
     private var lastCommentCount = ""
+    private var lastSection = "UNKNOWN"
     private var currentSection = "UNKNOWN"
 
     private var pollingJob: Job? = null
     private var currentForegroundApp = ""
 
     private var globalEnabled = true
+    private var ignoreIgHome = true
 
     private val targetPackages = setOf(
         "com.zhiliaoapp.musically",
@@ -45,6 +47,7 @@ class BlockerService : AccessibilityService() {
         overlay.attach()
 
         scope.launch { dataStore.globalEnabledFlow.collect { globalEnabled = it } }
+        scope.launch { dataStore.ignoreIgHomeFlow.collect { ignoreIgHome = it } }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -119,12 +122,22 @@ class BlockerService : AccessibilityService() {
         }
 
         if (isScroll) {
-            triggerScrollPenalty()
+            // --- IGNORES AND EXCLUSIONS ---
+            val skipIgHome = (ignoreIgHome && section == "IG_HOME")
+            val skipIgComments = (section == "IG_COMMENTS")
+
+            // NEW: Prevents a fake scroll when closing the comment section and returning to the Reel
+            val justLeftComments = (lastSection == "IG_COMMENTS" && section != "IG_COMMENTS")
+
+            if (!skipIgHome && !skipIgComments && !justLeftComments) {
+                triggerScrollPenalty()
+            }
         }
 
-        // Value -> Not Found will just save "" (Null) into the memory and not trigger a scroll
+        // Save current state for the next check
         lastLikeCount = likes ?: ""
         lastCommentCount = comments ?: ""
+        lastSection = section // Update the tracker
     }
 
     private fun triggerScrollPenalty() {
@@ -180,7 +193,6 @@ class BlockerService : AccessibilityService() {
 
                 // 3. DM Video Detection (Single video opened in chat)
                 if (text.startsWith("reply to ", ignoreCase = true) || desc.startsWith("reply to ", ignoreCase = true)) isIgDmVideo = true
-
                 // (General IG_DMS detection completely removed)
             }
             else if (pkg.contains("musically")) {
