@@ -33,6 +33,9 @@ class BlockerService : AccessibilityService() {
 
     private var globalEnabled = true
     private var ignoreIgHome = true
+    private var ignoreDmGlobal = true
+    private var ignoreDmIg = true
+    private var ignoreDmTt = true
 
     private val targetPackages = setOf(
         "com.zhiliaoapp.musically",
@@ -48,6 +51,9 @@ class BlockerService : AccessibilityService() {
 
         scope.launch { dataStore.globalEnabledFlow.collect { globalEnabled = it } }
         scope.launch { dataStore.ignoreIgHomeFlow.collect { ignoreIgHome = it } }
+        scope.launch { dataStore.ignoreDmGlobalFlow.collect { ignoreDmGlobal = it } }
+        scope.launch { dataStore.ignoreDmIgFlow.collect { ignoreDmIg = it } }
+        scope.launch { dataStore.ignoreDmTtFlow.collect { ignoreDmTt = it } }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -111,25 +117,25 @@ class BlockerService : AccessibilityService() {
 
         var isScroll = false
 
-        // Not Found ("") -> Value  OR  Value1 -> Value2
+        // value > value || not found > value likes
         if (likes != null && likes != lastLikeCount) {
             isScroll = true
         }
 
-        // Fallback: Not Found ("") -> Value  OR  Value1 -> Value2
+        // value > value || not found > value comments fallback
         if (comments != null && comments != lastCommentCount) {
             isScroll = true
         }
 
         if (isScroll) {
-            // --- IGNORES AND EXCLUSIONS ---
+            // --- ignores and exclusions
             val skipIgHome = (ignoreIgHome && section == "IG_HOME")
             val skipIgComments = (section == "IG_COMMENTS")
-
-            // NEW: Prevents a fake scroll when closing the comment section and returning to the Reel
             val justLeftComments = (lastSection == "IG_COMMENTS" && section != "IG_COMMENTS")
+            val skipTtDm = (ignoreDmGlobal && ignoreDmTt && section == "TT_DM_VIDEO")
+            val skipIgDm = (ignoreDmGlobal && ignoreDmIg && section == "IG_DM_VIDEO")
 
-            if (!skipIgHome && !skipIgComments && !justLeftComments) {
+            if (!skipIgHome && !skipIgComments && !justLeftComments && !skipTtDm && !skipIgDm) {
                 triggerScrollPenalty()
             }
         }
@@ -137,7 +143,7 @@ class BlockerService : AccessibilityService() {
         // Save current state for the next check
         lastLikeCount = likes ?: ""
         lastCommentCount = comments ?: ""
-        lastSection = section // Update the tracker
+        lastSection = section
     }
 
     private fun triggerScrollPenalty() {
