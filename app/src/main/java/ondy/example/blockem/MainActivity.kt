@@ -167,11 +167,10 @@ fun ScrollCategoryScreen(onBack: () -> Unit) {
 
     val maxScrolls by dataStore.maxScrollsFlow.collectAsState(initial = 50)
 
-    val ignoreFirst by dataStore.ignoreFirstScrollFlow.collectAsState(initial = true)
-    val ignoreIgHome by dataStore.ignoreIgHomeFlow.collectAsState(initial = true)
-    val ignoreDmGlobal by dataStore.ignoreDmGlobalFlow.collectAsState(initial = true)
-    val ignoreDmIg by dataStore.ignoreDmIgFlow.collectAsState(initial = true)
-    val ignoreDmTt by dataStore.ignoreDmTtFlow.collectAsState(initial = true)
+    val ignoreIgHome by dataStore.ignoreIgHomeFlow.collectAsState(initial = false)
+    val ignoreDmGlobal by dataStore.ignoreDmGlobalFlow.collectAsState(initial = false)
+    val ignoreDmIg by dataStore.ignoreDmIgFlow.collectAsState(initial = false)
+    val ignoreDmTt by dataStore.ignoreDmTtFlow.collectAsState(initial = false)
 
     Scaffold(
         topBar = {
@@ -206,7 +205,6 @@ fun ScrollCategoryScreen(onBack: () -> Unit) {
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
             Text("Exclusions", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
-            AppSwitchRow("Ignore First Scroll on App Open", ignoreFirst, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.IGNORE_FIRST_SCROLL, it) } }
             AppSwitchRow("Ignore IG Home Feed Videos", ignoreIgHome, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.IGNORE_IG_HOME, it) } }
 
             Spacer(modifier = Modifier.height(8.dp))

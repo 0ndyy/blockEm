@@ -32,10 +32,10 @@ class BlockerService : AccessibilityService() {
     private var currentForegroundApp = ""
 
     private var globalEnabled = true
-    private var ignoreIgHome = true
-    private var ignoreDmGlobal = true
-    private var ignoreDmIg = true
-    private var ignoreDmTt = true
+    private var ignoreIgHome = false
+    private var ignoreDmGlobal = false
+    private var ignoreDmIg = false
+    private var ignoreDmTt = false
 
     private val targetPackages = setOf(
         "com.zhiliaoapp.musically",
