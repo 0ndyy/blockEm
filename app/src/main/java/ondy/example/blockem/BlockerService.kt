@@ -156,7 +156,7 @@ class BlockerService : AccessibilityService() {
             if (newTotal >= maxScrolls) {
                 launchBlockActivity()
             } else {
-                overlay.flashCount(newTotal)
+                overlay.flashCount(newTotal, maxScrolls)
             }
         }
     }

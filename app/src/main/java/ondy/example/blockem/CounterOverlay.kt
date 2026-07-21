@@ -39,12 +39,14 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.Column
 
 class CounterOverlay(private val context: Context) {
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private var composeView: ComposeView? = null
 
     private val countFlow = MutableStateFlow(0)
+    private val maxFlow = MutableStateFlow(50)
     private val isVisibleFlow = MutableStateFlow(false)
     private val debugTextFlow = MutableStateFlow("Initializing Debug...") // NEW: Debug text state
 
@@ -103,9 +105,13 @@ class CounterOverlay(private val context: Context) {
                         enter = fadeIn(),
                         exit = fadeOut()
                     ) {
-                        Box(
+                        val currentMax by maxFlow.collectAsState()
+                        val scrollsLeft = (currentMax - count).coerceAtLeast(0)
+
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier
-                                .background(Color.Black.copy(alpha = 0.8f), RoundedCornerShape(50))
+                                .background(Color.Black.copy(alpha = 0.8f), RoundedCornerShape(16.dp))
                                 .padding(horizontal = 24.dp, vertical = 12.dp)
                         ) {
                             Text(
@@ -113,6 +119,12 @@ class CounterOverlay(private val context: Context) {
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 16.sp
+                            )
+                            Text(
+                                text = "$scrollsLeft left",
+                                color = Color.LightGray,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 12.sp
                             )
                         }
                     }
@@ -127,8 +139,9 @@ class CounterOverlay(private val context: Context) {
         debugTextFlow.value = text
     }
 
-    fun flashCount(newCount: Int) {
+    fun flashCount(newCount: Int, maxScrolls: Int) {
         countFlow.value = newCount
+        maxFlow.value = maxScrolls
         isVisibleFlow.value = true
 
         hideJob?.cancel()
