@@ -13,6 +13,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.ArrayDeque
+import android.content.Intent
 
 data class VideoMetrics(val likes: String?, val comments: String?)
 
@@ -36,6 +37,7 @@ class BlockerService : AccessibilityService() {
     private var ignoreDmGlobal = false
     private var ignoreDmIg = false
     private var ignoreDmTt = false
+    private var maxScrolls = 50
 
     private val targetPackages = setOf(
         "com.zhiliaoapp.musically",
@@ -54,6 +56,7 @@ class BlockerService : AccessibilityService() {
         scope.launch { dataStore.ignoreDmGlobalFlow.collect { ignoreDmGlobal = it } }
         scope.launch { dataStore.ignoreDmIgFlow.collect { ignoreDmIg = it } }
         scope.launch { dataStore.ignoreDmTtFlow.collect { ignoreDmTt = it } }
+        scope.launch { dataStore.maxScrollsFlow.collect { maxScrolls = it } }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -149,9 +152,22 @@ class BlockerService : AccessibilityService() {
     private fun triggerScrollPenalty() {
         scope.launch {
             val newTotal = dataStore.incrementScroll()
-            overlay.flashCount(newTotal)
+
+            if (newTotal >= maxScrolls) {
+                launchBlockActivity()
+            } else {
+                overlay.flashCount(newTotal)
+            }
         }
     }
+
+    private fun launchBlockActivity() {
+        val intent = Intent(this, BlockActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        startActivity(intent)
+    }
+
 
     // ==========================================
     // HEURISTICS: APP SECTION DETECTION
