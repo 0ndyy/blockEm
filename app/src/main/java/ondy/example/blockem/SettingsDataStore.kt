@@ -45,9 +45,18 @@ class SettingsDataStore(private val context: Context) {
     val ignoreDmTtFlow: Flow<Boolean> = context.dataStore.data.map { it[IGNORE_DM_TT] ?: false }
 
     val maxScrollsFlow: Flow<Int> = context.dataStore.data.map { it[MAX_SCROLLS] ?: 50 }
-    val dailyScrollsFlow: Flow<Int> = context.dataStore.data.map { it[DAILY_SCROLLS] ?: 0 }
 
-    // Expose the history to the UI
+    val dailyScrollsFlow: Flow<Int> = context.dataStore.data.map { prefs ->
+        val today = LocalDate.now().toString()
+        val lastDate = prefs[LAST_DATE]
+
+        if (lastDate != null && lastDate != today) {
+            0 //show 0 on new day
+        } else {
+            prefs[DAILY_SCROLLS] ?: 0
+        }
+    }
+
     val historyFlow: Flow<Map<String, Int>> = context.dataStore.data.map { prefs ->
         val historyStr = prefs[HISTORY] ?: ""
         historyStr.split(",")
@@ -71,11 +80,11 @@ class SettingsDataStore(private val context: Context) {
         val today = LocalDate.now().toString()
 
         context.dataStore.edit { prefs ->
-            val lastDate = prefs[LAST_DATE] ?: today
+            val lastDate = prefs[LAST_DATE]
             var currentCount = prefs[DAILY_SCROLLS] ?: 0
             val historyStr = prefs[HISTORY] ?: ""
 
-            // Parse history into a mutable map
+            // parse history into omap
             val historyMap = historyStr.split(",")
                 .filter { it.isNotEmpty() && it.contains(":") }
                 .associate {
@@ -83,20 +92,17 @@ class SettingsDataStore(private val context: Context) {
                     parts[0] to parts[1].toInt()
                 }.toMutableMap()
 
-            // If it's a new day, finalize yesterday's count in history and reset
-            if (lastDate != today) {
+            // trigger date reset if new day
+            if (lastDate != null && lastDate != today) {
                 historyMap[lastDate] = currentCount
                 currentCount = 0
-                prefs[LAST_DATE] = today
             }
 
             newCount = currentCount + 1
             prefs[DAILY_SCROLLS] = newCount
-
-            // Constantly keep today's current count updated in the history map for the graph
+            prefs[LAST_DATE] = today
             historyMap[today] = newCount
 
-            // Fix: Sort, take 30, and join directly to string (no invalid .toMap call)
             val recentHistoryEntries = historyMap.entries
                 .sortedByDescending { it.key }
                 .take(30)
@@ -106,7 +112,7 @@ class SettingsDataStore(private val context: Context) {
         return newCount
     }
 
-    // TEMPORARY: Generates random history data for the last 30 days
+    // generates random data to test UI
     suspend fun injectMockData() {
         context.dataStore.edit { prefs ->
             val mockData = (0..30).map { i ->
