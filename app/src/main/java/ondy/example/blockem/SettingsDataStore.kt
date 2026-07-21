@@ -29,9 +29,9 @@ class SettingsDataStore(private val context: Context) {
         val MAX_SCROLLS = intPreferencesKey("max_scrolls")
         val DAILY_SCROLLS = intPreferencesKey("daily_scrolls")
         val LAST_DATE = stringPreferencesKey("last_date")
+        val SHOW_SCROLLS_LEFT = booleanPreferencesKey("show_scrolls_left")
 
-        // Stores the history of the last 30 days
-        val HISTORY = stringPreferencesKey("history")
+        val HISTORY = stringPreferencesKey("history") //30 day history
     }
 
     val globalEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[GLOBAL_ENABLED] ?: true }
@@ -45,6 +45,7 @@ class SettingsDataStore(private val context: Context) {
     val ignoreDmTtFlow: Flow<Boolean> = context.dataStore.data.map { it[IGNORE_DM_TT] ?: false }
 
     val maxScrollsFlow: Flow<Int> = context.dataStore.data.map { it[MAX_SCROLLS] ?: 50 }
+    val showScrollsLeftFlow: Flow<Boolean> = context.dataStore.data.map { it[SHOW_SCROLLS_LEFT] ?: true }
 
     val dailyScrollsFlow: Flow<Int> = context.dataStore.data.map { prefs ->
         val today = LocalDate.now().toString()

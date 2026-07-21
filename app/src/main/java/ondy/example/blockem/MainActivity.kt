@@ -166,6 +166,7 @@ fun ScrollCategoryScreen(onBack: () -> Unit) {
     val yt by dataStore.ytEnabledFlow.collectAsState(initial = true)
 
     val maxScrolls by dataStore.maxScrollsFlow.collectAsState(initial = 50)
+    val showScrollsLeft by dataStore.showScrollsLeftFlow.collectAsState(initial = true)
 
     val ignoreIgHome by dataStore.ignoreIgHomeFlow.collectAsState(initial = false)
     val ignoreDmGlobal by dataStore.ignoreDmGlobalFlow.collectAsState(initial = false)
@@ -195,6 +196,9 @@ fun ScrollCategoryScreen(onBack: () -> Unit) {
                     FilledTonalIconButton(onClick = { scope.launch { dataStore.setMaxScrolls(maxScrolls + 5) } }) { Text("+", fontSize = 20.sp, fontWeight = FontWeight.Bold) }
                 }
             }
+
+            AppSwitchRow("Show 'Scrolls Left' on Overlay", showScrollsLeft, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.SHOW_SCROLLS_LEFT, it) } }
+
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
             Text("Target Apps", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)

@@ -47,8 +47,9 @@ class CounterOverlay(private val context: Context) {
 
     private val countFlow = MutableStateFlow(0)
     private val maxFlow = MutableStateFlow(50)
+    private val showLeftFlow = MutableStateFlow(true)
     private val isVisibleFlow = MutableStateFlow(false)
-    private val debugTextFlow = MutableStateFlow("Initializing Debug...") // NEW: Debug text state
+    private val debugTextFlow = MutableStateFlow("Initializing Debug...")
 
     private val scope = CoroutineScope(Dispatchers.Main)
     private var hideJob: Job? = null
@@ -56,7 +57,6 @@ class CounterOverlay(private val context: Context) {
     fun attach() {
         if (composeView != null) return
 
-        // Changed to MATCH_PARENT to allow easy multi-placement of Compose elements over the screen
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
@@ -106,6 +106,7 @@ class CounterOverlay(private val context: Context) {
                         exit = fadeOut()
                     ) {
                         val currentMax by maxFlow.collectAsState()
+                        val showLeft by showLeftFlow.collectAsState()
                         val scrollsLeft = (currentMax - count).coerceAtLeast(0)
 
                         Column(
@@ -120,12 +121,15 @@ class CounterOverlay(private val context: Context) {
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 16.sp
                             )
-                            Text(
-                                text = "$scrollsLeft left",
-                                color = Color.LightGray,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 12.sp
-                            )
+                            if(showLeft)
+                            {
+                                Text(
+                                    text = "$scrollsLeft left",
+                                    color = Color.LightGray,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp
+                                )
+                            }
                         }
                     }
                 }
@@ -139,9 +143,10 @@ class CounterOverlay(private val context: Context) {
         debugTextFlow.value = text
     }
 
-    fun flashCount(newCount: Int, maxScrolls: Int) {
+    fun flashCount(newCount: Int, maxScrolls: Int, showLeft: Boolean) {
         countFlow.value = newCount
         maxFlow.value = maxScrolls
+        showLeftFlow.value = showLeft
         isVisibleFlow.value = true
 
         hideJob?.cancel()

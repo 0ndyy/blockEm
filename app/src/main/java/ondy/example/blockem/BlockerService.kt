@@ -38,6 +38,7 @@ class BlockerService : AccessibilityService() {
     private var ignoreDmIg = false
     private var ignoreDmTt = false
     private var maxScrolls = 50
+    private var showScrollsLeft = true
 
     private val targetPackages = setOf(
         "com.zhiliaoapp.musically",
@@ -57,6 +58,7 @@ class BlockerService : AccessibilityService() {
         scope.launch { dataStore.ignoreDmIgFlow.collect { ignoreDmIg = it } }
         scope.launch { dataStore.ignoreDmTtFlow.collect { ignoreDmTt = it } }
         scope.launch { dataStore.maxScrollsFlow.collect { maxScrolls = it } }
+        scope.launch { dataStore.showScrollsLeftFlow.collect { showScrollsLeft = it } }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -156,7 +158,7 @@ class BlockerService : AccessibilityService() {
             if (newTotal >= maxScrolls) {
                 launchBlockActivity()
             } else {
-                overlay.flashCount(newTotal, maxScrolls)
+                overlay.flashCount(newTotal, maxScrolls, showScrollsLeft) // NEW: Added showScrollsLeft
             }
         }
     }
