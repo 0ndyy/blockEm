@@ -42,7 +42,7 @@ class SettingsDataStore(private val context: Context) {
     val ytEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[YT_ENABLED] ?: true }
 
     val ignoreIgHomeFlow: Flow<Boolean> = context.dataStore.data.map { it[IGNORE_IG_HOME] ?: false }
-    val ignoreDmGlobalFlow: Flow<Boolean> = context.dataStore.data.map { it[IGNORE_DM_GLOBAL] ?: false }
+    val ignoreDmGlobalFlow: Flow<Boolean> = context.dataStore.data.map { it[IGNORE_DM_GLOBAL] ?: true }
     val ignoreDmIgFlow: Flow<Boolean> = context.dataStore.data.map { it[IGNORE_DM_IG] ?: false }
     val ignoreDmTtFlow: Flow<Boolean> = context.dataStore.data.map { it[IGNORE_DM_TT] ?: false }
 

@@ -169,7 +169,8 @@ fun ScrollCategoryScreen(onBack: () -> Unit) {
     val showScrollsLeft by dataStore.showScrollsLeftFlow.collectAsState(initial = true)
 
     val ignoreIgHome by dataStore.ignoreIgHomeFlow.collectAsState(initial = false)
-    val ignoreDmGlobal by dataStore.ignoreDmGlobalFlow.collectAsState(initial = false)
+    // The Global DM flow is still collected in the background, just not shown
+    val ignoreDmGlobal by dataStore.ignoreDmGlobalFlow.collectAsState(initial = true)
     val ignoreDmIg by dataStore.ignoreDmIgFlow.collectAsState(initial = false)
     val ignoreDmTt by dataStore.ignoreDmTtFlow.collectAsState(initial = false)
 
@@ -181,43 +182,45 @@ fun ScrollCategoryScreen(onBack: () -> Unit) {
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).padding(16.dp).verticalScroll(scrollState)) {
+
+            //Eneble Engine
             Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Enable Engine", fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Switch(checked = global, onCheckedChange = { scope.launch { dataStore.setSwitch(SettingsDataStore.GLOBAL_ENABLED, it) } })
             }
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
+            //Harad Limit
             Text("Hard Limit", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
             Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Max Scrolls / Day", fontSize = 16.sp)
+                Text("Max Scrolls / Day", fontSize = 16.sp, color = if (global) MaterialTheme.colorScheme.onSurface else Color.Gray)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    FilledTonalIconButton(onClick = { scope.launch { dataStore.setMaxScrolls(maxOf(1, maxScrolls - 5)) } }) { Text("-", fontSize = 20.sp, fontWeight = FontWeight.Bold) }
-                    Text("$maxScrolls", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp))
-                    FilledTonalIconButton(onClick = { scope.launch { dataStore.setMaxScrolls(maxScrolls + 5) } }) { Text("+", fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+                    FilledTonalIconButton(onClick = { scope.launch { dataStore.setMaxScrolls(maxOf(1, maxScrolls - 5)) } }, enabled = global) { Text("-", fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+                    Text("$maxScrolls", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp), color = if (global) MaterialTheme.colorScheme.onSurface else Color.Gray)
+                    FilledTonalIconButton(onClick = { scope.launch { dataStore.setMaxScrolls(maxScrolls + 5) } }, enabled = global) { Text("+", fontSize = 20.sp, fontWeight = FontWeight.Bold) }
                 }
             }
-
             AppSwitchRow("Show 'Scrolls Left' on Overlay", showScrollsLeft, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.SHOW_SCROLLS_LEFT, it) } }
-
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
-            Text("Target Apps", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
-            AppSwitchRow("Instagram Reels", ig, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.IG_ENABLED, it) } }
-            AppSwitchRow("TikTok", tt, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.TT_ENABLED, it) } }
-            AppSwitchRow("YouTube Shorts", yt, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.YT_ENABLED, it) } }
-
+            //TikTok
+            Text("TikTok", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
+            AppSwitchRow("Count TT Scrolls", tt, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.TT_ENABLED, it) } }
+            AppSwitchRow("Ignore TT DMs", ignoreDmTt, enabled = global && tt) { scope.launch { dataStore.setSwitch(SettingsDataStore.IGNORE_DM_TT, it) } }
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
-            Text("Exclusions", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
-            AppSwitchRow("Ignore IG Home Feed Videos", ignoreIgHome, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.IGNORE_IG_HOME, it) } }
+            //Instagram
+            Text("Instagram", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
+            AppSwitchRow("Count IG Scrolls", ig, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.IG_ENABLED, it) } }
+            AppSwitchRow("Ignore IG DMs", ignoreDmIg, enabled = global && ig) { scope.launch { dataStore.setSwitch(SettingsDataStore.IGNORE_DM_IG, it) } }
+            AppSwitchRow("Ignore IG Home Feed Videos", ignoreIgHome, enabled = global && ig) { scope.launch { dataStore.setSwitch(SettingsDataStore.IGNORE_IG_HOME, it) } }
+            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
-            Spacer(modifier = Modifier.height(8.dp))
-            AppSwitchRow("Ignore DM Videos (Global)", ignoreDmGlobal, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.IGNORE_DM_GLOBAL, it) } }
+            //Youtube
+            Text("YouTube", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
+            AppSwitchRow("Count YT Scrolls", yt, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.YT_ENABLED, it) } }
 
-            if (ignoreDmGlobal) {
-                AppSwitchRow("   ↳ Instagram DMs", ignoreDmIg, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.IGNORE_DM_IG, it) } }
-                AppSwitchRow("   ↳ TikTok DMs", ignoreDmTt, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.IGNORE_DM_TT, it) } }
-            }
+            Spacer(modifier = Modifier.height(32.dp))
         }
     }
 }
