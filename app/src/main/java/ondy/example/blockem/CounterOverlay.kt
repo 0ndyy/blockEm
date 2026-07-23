@@ -50,6 +50,7 @@ class CounterOverlay(private val context: Context) {
     private val showLeftFlow = MutableStateFlow(true)
     private val isVisibleFlow = MutableStateFlow(false)
     private val debugTextFlow = MutableStateFlow("Initializing Debug...")
+    private val isDebugVisibleFlow = MutableStateFlow(false)
 
     private val scope = CoroutineScope(Dispatchers.Main)
     private var hideJob: Job? = null
@@ -81,24 +82,27 @@ class CounterOverlay(private val context: Context) {
                 val debugText by debugTextFlow.collectAsState()
 
                 Box(modifier = Modifier.fillMaxSize()) {
-
-                    // --- ALWAYS VISIBLE DEBUG TEXT ---
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(top = 40.dp, start = 16.dp)
-                            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                            .padding(12.dp)
-                    ) {
-                        Text(
-                            text = debugText,
-                            color = Color.Green,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 12.sp
-                        )
+                    //debug text!!
+                    val isDebugVisible by isDebugVisibleFlow.collectAsState()
+                    if(isDebugVisible)
+                    {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(top = 40.dp, start = 16.dp)
+                                .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                .padding(12.dp)
+                        ) {
+                            Text(
+                                text = debugText,
+                                color = Color.Green,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 12.sp
+                            )
+                        }
                     }
 
-                    // --- FLASHING SCROLL COUNTER ---
+                    //scrolls counter overlay
                     AnimatedVisibility(
                         visible = isVisible,
                         modifier = Modifier.align(Alignment.TopCenter).padding(top = 100.dp),
@@ -141,6 +145,10 @@ class CounterOverlay(private val context: Context) {
 
     fun updateDebugText(text: String) {
         debugTextFlow.value = text
+    }
+
+    fun setDebugVisible(isVisible: Boolean) {
+        isDebugVisibleFlow.value = isVisible
     }
 
     fun flashCount(newCount: Int, maxScrolls: Int, showLeft: Boolean) {

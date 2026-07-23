@@ -268,10 +268,8 @@ fun StatsScreen() {
         modifier = Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // RENAMED TO "Overview"
         Text("Overview", fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 16.dp))
 
-        // MOVED PERCENTAGE UNDERNEATH THE NUMBER
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(vertical = 8.dp)
@@ -294,7 +292,7 @@ fun StatsScreen() {
             Surface(
                 color = percentColor.copy(alpha = 0.15f),
                 shape = RoundedCornerShape(50),
-                modifier = Modifier.offset(y = (-8).dp) // Tucks it slightly closer to the big number
+                modifier = Modifier.offset(y = (-8).dp)
             ) {
                 Text(
                     text = percentText,
@@ -310,7 +308,6 @@ fun StatsScreen() {
 
         Text("Past 30 Days", fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Start).padding(bottom = 16.dp))
 
-        // FULL SCREEN GRAPH: Replaced .height(200.dp) with .weight(1f)
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
@@ -401,17 +398,8 @@ fun StatsScreen() {
                 )
             }
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
-        TextButton(onClick = { scope.launch { dataStore.injectMockData() } }) {
-            Text("Generate Mock Data", color = Color.Gray)
-        }
     }
 }
-
-
-
-// --- PERMISSIONS TAB & HELPERS ---
 
 @Composable
 fun PermissionsScreen(onPermissionsGranted: () -> Unit = {}, isSettingsTab: Boolean = false) {
@@ -442,11 +430,75 @@ fun PermissionsScreen(onPermissionsGranted: () -> Unit = {}, isSettingsTab: Bool
     val isOverlayGranted = remember(resumeTrigger) { checkOverlayPermission(context) }
 
     if (isSettingsTab) {
+        val scope = rememberCoroutineScope()
+        val dataStore = remember { SettingsDataStore(context) }
+
+        val showDebugUi by dataStore.showDebugUiFlow.collectAsState(initial = false)
+
+        var showMockDataDialog by remember { mutableStateOf(false) }
+        var showClearDataDialog by remember { mutableStateOf(false) }
+
         Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Permissions", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(bottom = 32.dp))
+            Text("Permissions", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(bottom = 24.dp))
             PermissionCard("Display Over Other Apps", "Required to show the counter.", isOverlayGranted) { context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))) }
             Spacer(modifier = Modifier.height(16.dp))
             PermissionCard("Accessibility Service", "Required to detect scrolling.", isAccessibilityGranted) { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Text("Developer Options", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(bottom = 8.dp).align(Alignment.Start))
+            AppSwitchRow("Show Debug Overlay (Green Text)", showDebugUi, enabled = true) { scope.launch { dataStore.setSwitch(SettingsDataStore.SHOW_DEBUG_UI, it) } }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text("Data Management", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(bottom = 16.dp))
+
+            Button(
+                onClick = { showClearDataDialog = true },
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                modifier = Modifier.fillMaxWidth().height(48.dp)
+            ) {
+                Text("Clear Today's Data", fontWeight = FontWeight.Bold)
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            OutlinedButton(
+                onClick = { showMockDataDialog = true },
+                modifier = Modifier.fillMaxWidth().height(48.dp)
+            ) {
+                Text("Generate Mock Data (Graph)", color = MaterialTheme.colorScheme.onSurface)
+            }
+        }
+
+        if (showClearDataDialog) {
+            AlertDialog(
+                onDismissRequest = { showClearDataDialog = false },
+                title = { Text("Clear Today's Data?") },
+                text = { Text("This will reset your scroll count for today to 0. This action cannot be undone!") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        scope.launch { dataStore.clearTodaysData() }
+                        showClearDataDialog = false
+                    }) { Text("Clear", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = { TextButton(onClick = { showClearDataDialog = false }) { Text("Cancel") } }
+            )
+        }
+
+        if (showMockDataDialog) {
+            AlertDialog(
+                onDismissRequest = { showMockDataDialog = false },
+                title = { Text("Generate Mock Data?") },
+                text = { Text("This will overwrite your whole scrolls history with random fake data. This action cannot be undone!") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        scope.launch { dataStore.injectMockData() }
+                        showMockDataDialog = false
+                    }) { Text("Generate", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = { TextButton(onClick = { showMockDataDialog = false }) { Text("Cancel") } }
+            )
         }
         return
     }
@@ -462,8 +514,8 @@ fun PermissionsScreen(onPermissionsGranted: () -> Unit = {}, isSettingsTab: Bool
             when (currentPage) {
                 0 -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Welcome to BlockEm", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(bottom = 16.dp))
-                        Text("Take back control of your attention. To make this work seamlessly, we need two quick permissions.", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(bottom = 48.dp))
+                        Text("Are you cooked?", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(bottom = 16.dp))
+                        Text("Cut the slop from your life and unfry your brain. To make this work seamlessly, we need two quick permissions.", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(bottom = 48.dp))
                         Button(onClick = { if (isOverlayGranted && isAccessibilityGranted) onPermissionsGranted() else if (isOverlayGranted) currentPage = 2 else currentPage = 1 }, modifier = Modifier.fillMaxWidth().height(50.dp)) { Text("Let's Go", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
                     }
                 }
@@ -471,14 +523,14 @@ fun PermissionsScreen(onPermissionsGranted: () -> Unit = {}, isSettingsTab: Bool
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Step 1: Overlay", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(bottom = 16.dp))
                         Text("We need permission to draw the scroll counter and block screen over your addictive apps.", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(bottom = 48.dp))
-                        PermissionCard("Display Over Other Apps", "Required to show the counter.", isOverlayGranted) { context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))) }
+                        PermissionCard("Display Over Other Apps", "Required to show overlays.", isOverlayGranted) { context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))) }
                     }
                 }
                 2 -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Step 2: Accessibility", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(bottom = 16.dp))
-                        Text("This allows the engine to securely count your scrolls and detect when you open Reels or Shorts.", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(bottom = 48.dp))
-                        PermissionCard("Accessibility Service", "Required to detect scrolling.", isAccessibilityGranted) { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                        Text("This allows us to count your scrolls and detect when you open Reels or Shorts.", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(bottom = 48.dp))
+                        PermissionCard("Accessibility Service", "Required for general functionality.", isAccessibilityGranted) { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
                     }
                 }
             }

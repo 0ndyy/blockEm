@@ -59,6 +59,7 @@ class BlockerService : AccessibilityService() {
         scope.launch { dataStore.ignoreDmTtFlow.collect { ignoreDmTt = it } }
         scope.launch { dataStore.maxScrollsFlow.collect { maxScrolls = it } }
         scope.launch { dataStore.showScrollsLeftFlow.collect { showScrollsLeft = it } }
+        scope.launch { dataStore.showDebugUiFlow.collect { showDebug -> overlay.setDebugVisible(showDebug) } }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
