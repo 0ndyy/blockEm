@@ -136,17 +136,56 @@ fun MainDashboardScreen(navController: NavHostController, startTab: Int = 0) {
 
 @Composable
 fun HomeScreen(navController: NavHostController) {
+    val context = LocalContext.current
+    val dataStore = remember { SettingsDataStore(context) }
+    val globalEnabled by dataStore.globalEnabledFlow.collectAsState(initial = true)
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Categories", fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 32.dp, bottom = 16.dp))
 
         Card(
             modifier = Modifier.fillMaxWidth().clickable { navController.navigate("scroll_category") },
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            // Slightly dims the background if disabled
+            colors = CardDefaults.cardColors(
+                containerColor = if (globalEnabled) MaterialTheme.colorScheme.surfaceVariant
+                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            )
         ) {
-            Row(modifier = Modifier.padding(24.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column {
-                    Text("Scroll Counter & Blocker", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Text("Manage tracking & hard limits", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(
+                modifier = Modifier.padding(24.dp).fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween // Pushes the indicator to the right edge
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Scroll Counter & Blocker",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (globalEnabled) MaterialTheme.colorScheme.onSurface else Color.Gray
+                    )
+                    Text(
+                        text = "Manage tracking & hard limits",
+                        fontSize = 14.sp,
+                        color = if (globalEnabled) MaterialTheme.colorScheme.onSurfaceVariant else Color.Gray
+                    )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .background(
+                                color = if (globalEnabled) Color(0xFF43A047) else Color.Gray, // Green or Gray
+                                shape = androidx.compose.foundation.shape.CircleShape
+                            )
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (globalEnabled) "ON" else "OFF",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (globalEnabled) Color(0xFF43A047) else Color.Gray
+                    )
                 }
             }
         }
