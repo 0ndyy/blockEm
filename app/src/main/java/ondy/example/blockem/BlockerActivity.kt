@@ -26,25 +26,25 @@ class BlockActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             BlockEmTheme {
-                // If they try to swipe "Back" to escape, kick them to the Home screen
+                //if try to press back button
                 BackHandler {
-                    goHome()
+                    returnToStats()
                 }
 
                 BlockScreenUI(onReturnClicked = {
-                    goHome()
+                    returnToStats()
                 })
             }
         }
     }
 
-    private fun goHome() {
-        val homeIntent = Intent(Intent.ACTION_MAIN).apply {
-            addCategory(Intent.CATEGORY_HOME)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+    private fun returnToStats() {
+        val statsIntent = Intent(this, MainActivity::class.java).apply {
+            putExtra("START_TAB", 1)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
-        startActivity(homeIntent)
-        finish() // Kill the activity so it doesn't stay in the "Recent Apps" menu
+        startActivity(statsIntent)
+        finish()
     }
 }
 

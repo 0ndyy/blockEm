@@ -50,17 +50,18 @@ import androidx.compose.ui.text.rememberTextMeasurer
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val startTab = intent.getIntExtra("START_TAB", 0)
         enableEdgeToEdge()
         setContent {
             BlockEmTheme {
-                AppNavigation()
+                AppNavigation(startTab = startTab)
             }
         }
     }
 }
 
 @Composable
-fun AppNavigation() {
+fun AppNavigation(startTab: Int = 0) {
     val navController = rememberNavController()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -90,14 +91,14 @@ fun AppNavigation() {
                 }
             )
         }
-        composable("main_dashboard") { MainDashboardScreen(navController) }
+        composable("main_dashboard") { MainDashboardScreen(navController, startTab) }
         composable("scroll_category") { ScrollCategoryScreen(onBack = { navController.popBackStack() }) }
     }
 }
 
 @Composable
-fun MainDashboardScreen(navController: NavHostController) {
-    var selectedTab by remember { mutableStateOf(0) }
+fun MainDashboardScreen(navController: NavHostController, startTab: Int = 0) {
+    var selectedTab by remember { mutableStateOf(startTab) }
 
     Scaffold(
         bottomBar = {
