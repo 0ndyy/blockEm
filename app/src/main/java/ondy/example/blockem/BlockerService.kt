@@ -326,37 +326,38 @@ class BlockerService : AccessibilityService() {
                     }
                 }
 
-                // 3. Instagram Reels & Home
+// 3. Instagram Reels & Home
                 else if (pkg.contains("instagram")) {
-                    // Likes (Added !id.contains("comment") to ignore likes inside comment sections)
-                    if ((id.contains("like_count") || id.contains("like_button")) && !id.contains("comment")) {
-                        if (text.isNotEmpty() && text.any { it.isDigit() }) foundLike = text
-                    } else if (desc.equals("like", ignoreCase = true) || desc.equals("liked", ignoreCase = true)) {
-                        if (text.isNotEmpty() && text.any { it.isDigit() }) {
-                            foundLike = text
-                        } else {
-                            val parent = node.parent
-                            if (parent != null) {
-                                for (i in 0 until parent.childCount) {
-                                    val sibText = parent.getChild(i)?.text?.toString() ?: ""
-                                    if (sibText.isNotEmpty() && sibText.any { it.isDigit() }) {
-                                        foundLike = sibText
-                                        break
+                    // LIKES
+                    // Wrapped the ENTIRE Like detection in this to prevent comment hearts from triggering it
+                    if (!id.contains("comment")) {
+                        if (id.contains("like_count") || id.contains("like_button")) {
+                            if (text.isNotEmpty() && text.any { it.isDigit() }) foundLike = text
+                        } else if (desc.equals("like", ignoreCase = true) || desc.equals("liked", ignoreCase = true)) {
+                            if (text.isNotEmpty() && text.any { it.isDigit() }) {
+                                foundLike = text
+                            } else {
+                                val parent = node.parent
+                                if (parent != null) {
+                                    for (i in 0 until parent.childCount) {
+                                        val sibText = parent.getChild(i)?.text?.toString() ?: ""
+                                        if (sibText.isNotEmpty() && sibText.any { it.isDigit() }) {
+                                            foundLike = sibText
+                                            break
+                                        }
                                     }
                                 }
                             }
+                        } else if (desc.contains("like", ignoreCase = true) && desc.any { it.isDigit() }) {
+                            val match = Regex("(?i)(\\d+[\\d,kKmM]*)\\s*likes?").find(desc)
+                            if (match != null) foundLike = match.value
                         }
-                    } else if (desc.contains("like", ignoreCase = true) && desc.any { it.isDigit() }) {
-                        // Carousel Fix: Extracts ONLY the like amount from long descriptions
-                        val match = Regex("(?i)(\\d+[\\d,kKmM]*)\\s*likes?").find(desc)
-                        if (match != null) foundLike = match.value
                     }
 
-                    // Comments (Added !id.contains("like") to avoid cross-contamination)
+                    // COMMENTS
                     if ((id.contains("comment_count") || id.contains("comment_button")) && !id.contains("like")) {
                         if (text.isNotEmpty() && text.any { it.isDigit() }) foundComment = text
                     } else if (desc.contains("comment", ignoreCase = true) && desc.any { it.isDigit() }) {
-                        // Carousel Fix: Extracts ONLY the comment amount
                         val match = Regex("(?i)(\\d+[\\d,kKmM]*)\\s*comments?").find(desc)
                         if (match != null) {
                             foundComment = match.value
@@ -364,7 +365,8 @@ class BlockerService : AccessibilityService() {
                             foundComment = desc
                         }
                     }
-                }
+                } 
+
 
                 if (foundLike != null) {
                     val rect = android.graphics.Rect()
