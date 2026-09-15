@@ -192,6 +192,7 @@ class BlockerService : AccessibilityService() {
         var isTtSearch = false
 
         var isYtShorts = false
+        var hasOtherTabSelected = false
 
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
@@ -207,8 +208,11 @@ class BlockerService : AccessibilityService() {
                 if (desc == "reels" || text == "reels") isIgReels = true
                 if (desc == "search and explore" || text == "search and explore" || desc == "explore" || text == "explore") isIgExplore = true
 
-                // Master Override: Keeps node.isSelected. If the tab bar is visible, this wins.
-                if ((desc.contains("home") || desc.contains("inicio")) && node.isSelected) isIgHome = true
+                // SCROLL & COLD-START FIX: Assume Home if the tab is visible, but flag if another tab is actively selected
+                if (desc.contains("home") || desc.contains("inicio")) isIgHome = true
+                if (node.isSelected && (desc == "search and explore" || desc == "explore" || desc == "reels" || desc == "profile" || text == "profile")) {
+                    hasOtherTabSelected = true
+                }
 
                 // 1. Comment Section Detection
                 if (text.equals("comments", ignoreCase = true) || id.contains("comment_thread")) isIgComments = true
@@ -251,7 +255,7 @@ class BlockerService : AccessibilityService() {
             isIgComments -> "IG_COMMENTS"
             isIgDmVideo -> "IG_DM_VIDEO"
             isIgDmFeed -> "IG_DM_FEED"
-            isIgHome -> "IG_HOME"
+            (isIgHome && !hasOtherTabSelected) -> "IG_HOME"
             isIgReels -> "IG_REELS"
             isIgExplore -> "IG_EXPLORE"
 
