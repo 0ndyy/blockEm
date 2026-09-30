@@ -80,7 +80,7 @@ fun BlockScreenUI(onReturnClicked: () -> Unit) {
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 modifier = Modifier.fillMaxWidth(0.6f).height(50.dp)
             ) {
-                Text("Return", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text("Overview", fontSize = 18.sp, fontWeight = FontWeight.Bold)
             }
         }
     }

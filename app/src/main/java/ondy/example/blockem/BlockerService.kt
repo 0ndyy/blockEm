@@ -65,7 +65,7 @@ class BlockerService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null || !globalEnabled) return
 
-        // 1. Keep track of what app is currently on the screen
+        // 1. track what app is currently on screen
         val pkg = event.packageName?.toString()
         if (pkg != null && pkg != "ondy.example.blockem" && pkg != "com.android.systemui") {
             if (currentForegroundApp != pkg) {
@@ -74,7 +74,6 @@ class BlockerService : AccessibilityService() {
             }
         }
 
-        // Fallback: If Android drops the state change event, ensure the loop runs anyway if a target app sends any event
         if (pkg in targetPackages && pollingJob?.isActive != true) {
             currentForegroundApp = pkg ?: ""
             managePollingLoop()
@@ -82,13 +81,13 @@ class BlockerService : AccessibilityService() {
     }
 
     // ==========================================
-    // THE POLLING ENGINE (Fixes Screen Off & Missed Updates)
+    // POLLING ENGINE(ensures tha app is running)
     // ==========================================
     private fun managePollingLoop() {
         if (currentForegroundApp in targetPackages) {
-            if (pollingJob?.isActive == true) return // Already running
+            if (pollingJob?.isActive == true) return // alreadt running
 
-            // Start scanning the screen 4 times a second
+            // start scanning screen 4x/s
             pollingJob = scope.launch {
                 while (isActive) {
                     val root = try { rootInActiveWindow } catch (e: Exception) { null }
@@ -96,15 +95,15 @@ class BlockerService : AccessibilityService() {
                     if (root != null) {
                         analyzeScreenState(root, currentForegroundApp)
                     } else {
-                        // Screen turned off, or app minimized. Reset memory so we don't get stuck!
+                        // screen off or minimized - refresh
                         lastLikeCount = ""
                         overlay.updateDebugText("Status: Waiting for Screen...")
                     }
-                    delay(250) // Wait 250ms before checking again (smooth, responsive, saves battery)
+                    delay(250)
                 }
             }
         } else {
-            // We left the target apps. Kill the loop.
+            // target app left - kill to save battery
             pollingJob?.cancel()
             lastLikeCount = ""
             overlay.updateDebugText("Status: Sleeping")
@@ -146,7 +145,7 @@ class BlockerService : AccessibilityService() {
             }
         }
 
-        // Save current state for the next check
+        // saves current state for next time
         lastLikeCount = likes ?: ""
         lastCommentCount = comments ?: ""
         lastSection = section
@@ -172,7 +171,7 @@ class BlockerService : AccessibilityService() {
     }
 
 
-    // ==========================================
+    // =========================================
     // HEURISTICS: APP SECTION DETECTION
     // ==========================================
     private fun identifySection(root: AccessibilityNodeInfo, pkg: String): String {
@@ -204,31 +203,31 @@ class BlockerService : AccessibilityService() {
             val id = node.viewIdResourceName?.lowercase() ?: ""
 
             if (pkg.contains("instagram")) {
-                // Fullscreen detection
+                // fullscreen detection
                 if (desc == "reels" || text == "reels") isIgReels = true
                 if (desc == "search and explore" || text == "search and explore" || desc == "explore" || text == "explore") isIgExplore = true
 
-                // SCROLL & COLD-START FIX: Assume Home if the tab is visible, but flag if another tab is actively selected
+                // detect home tab on cold start fix
                 if (desc.contains("home") || desc.contains("inicio")) isIgHome = true
                 if (node.isSelected && (desc == "search and explore" || desc == "explore" || desc == "reels" || desc == "profile" || text == "profile")) {
                     hasOtherTabSelected = true
                 }
 
-                // 1. Comment Section Detection
+                // comment section detection
                 if (text.equals("comments", ignoreCase = true) || id.contains("comment_thread")) isIgComments = true
 
-                // 2. DM Feed Detection (Endless scrolling sent from chat)
+                // dm feed detection
                 if (text.equals("send to chat", ignoreCase = true) || desc.equals("send to chat", ignoreCase = true)) isIgDmFeed = true
 
-                // 3. DM Video Detection (Single video opened in chat)
+                // dm video detection !!need to add dm posts here
                 if (text.startsWith("reply to ", ignoreCase = true) || desc.startsWith("reply to ", ignoreCase = true)) isIgDmVideo = true
-                // (General IG_DMS detection completely removed)
             }
             else if (pkg.contains("musically")) {
                 if (text == "for you" && node.isSelected) isTtFyp = true
                 if (text == "following" && node.isSelected) isTtFollowing = true
                 if (text == "inbox" && node.isSelected) isTtInbox = true
                 if (text == "profile" && node.isSelected) isTtProfile = true
+                //need to add searched images here!!!
 
                 if (id.contains("chat_room") || id.contains("msg_box") || id.contains("im_message")) isTtDmChat = true
                 if (text == "message..." || desc == "message...") isTtDmChat = true
@@ -250,7 +249,7 @@ class BlockerService : AccessibilityService() {
             }
         }
 
-        // Return order dictates priority!
+        // return order = priority
         return when {
             isIgComments -> "IG_COMMENTS"
             isIgDmVideo -> "IG_DM_VIDEO"
@@ -276,7 +275,7 @@ class BlockerService : AccessibilityService() {
         }
     }
 
-    // ==========================================
+    // =========================================
     // HEURISTICS: VIDEO METRICS EXTRACTION
     // ==========================================
     private fun extractVideoMetrics(root: AccessibilityNodeInfo, pkg: String): VideoMetrics {
@@ -316,7 +315,7 @@ class BlockerService : AccessibilityService() {
                     }
                 }
 
-                // 2. TikTok FYP & Following
+                // 2. TikTok FYP and Following
                 else if (pkg.contains("musically")) {
                     if (id.contains("digg_count") || id.contains("like_text")) {
                         if (text.isNotEmpty() && text.any { it.isDigit() }) foundLike = text
@@ -330,10 +329,9 @@ class BlockerService : AccessibilityService() {
                     }
                 }
 
-// 3. Instagram Reels & Home
+                // 3. Instagram Reels and Home
                 else if (pkg.contains("instagram")) {
-                    // LIKES
-                    // Wrapped the ENTIRE Like detection in this to prevent comment hearts from triggering it
+                    // LIKES (primary)
                     if (!id.contains("comment")) {
                         if (id.contains("like_count") || id.contains("like_button")) {
                             if (text.isNotEmpty() && text.any { it.isDigit() }) foundLike = text
@@ -358,7 +356,7 @@ class BlockerService : AccessibilityService() {
                         }
                     }
 
-                    // COMMENTS
+                    // COMMENTS  (secondary)
                     if ((id.contains("comment_count") || id.contains("comment_button")) && !id.contains("like")) {
                         if (text.isNotEmpty() && text.any { it.isDigit() }) foundComment = text
                     } else if (desc.contains("comment", ignoreCase = true) && desc.any { it.isDigit() }) {

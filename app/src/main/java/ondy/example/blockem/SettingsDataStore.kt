@@ -122,7 +122,6 @@ class SettingsDataStore(private val context: Context) {
         context.dataStore.edit { prefs ->
             val mockData = (0..30).map { i ->
                 val date = LocalDate.now().minusDays(i.toLong()).toString()
-                // Keep today's actual count, randomize the past days between 15 and 80
                 val count = if (i == 0) prefs[DAILY_SCROLLS] ?: 0 else (15..80).random()
                 date to count
             }

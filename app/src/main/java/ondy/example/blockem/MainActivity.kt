@@ -145,7 +145,6 @@ fun HomeScreen(navController: NavHostController) {
 
         Card(
             modifier = Modifier.fillMaxWidth().clickable { navController.navigate("scroll_category") },
-            // Slightly dims the background if disabled
             colors = CardDefaults.cardColors(
                 containerColor = if (globalEnabled) MaterialTheme.colorScheme.surfaceVariant
                 else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
@@ -154,7 +153,7 @@ fun HomeScreen(navController: NavHostController) {
             Row(
                 modifier = Modifier.padding(24.dp).fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween // Pushes the indicator to the right edge
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -175,7 +174,7 @@ fun HomeScreen(navController: NavHostController) {
                         modifier = Modifier
                             .size(10.dp)
                             .background(
-                                color = if (globalEnabled) Color(0xFF43A047) else Color.Gray, // Green or Gray
+                                color = if (globalEnabled) Color(0xFF43A047) else Color.Gray,
                                 shape = androidx.compose.foundation.shape.CircleShape
                             )
                     )
@@ -209,7 +208,7 @@ fun ScrollCategoryScreen(onBack: () -> Unit) {
     val showScrollsLeft by dataStore.showScrollsLeftFlow.collectAsState(initial = true)
 
     val ignoreIgHome by dataStore.ignoreIgHomeFlow.collectAsState(initial = false)
-    // The Global DM flow is still collected in the background, just not shown
+    //global dm stored in background
     val ignoreDmGlobal by dataStore.ignoreDmGlobalFlow.collectAsState(initial = true)
     val ignoreDmIg by dataStore.ignoreDmIgFlow.collectAsState(initial = false)
     val ignoreDmTt by dataStore.ignoreDmTtFlow.collectAsState(initial = false)
