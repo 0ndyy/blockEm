@@ -46,6 +46,8 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
+import android.app.TimePickerDialog
+import java.util.Calendar
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -213,6 +215,9 @@ fun ScrollCategoryScreen(onBack: () -> Unit) {
     val ignoreDmIg by dataStore.ignoreDmIgFlow.collectAsState(initial = false)
     val ignoreDmTt by dataStore.ignoreDmTtFlow.collectAsState(initial = false)
 
+    val cheatEnabled by dataStore.cheatHoursEnabledFlow.collectAsState(initial = false)
+    val cheatSchedule by dataStore.cheatHoursScheduleFlow.collectAsState(initial = "")
+
     Scaffold(
         topBar = {
             TopAppBar(title = { Text("Scroll Counter") }, navigationIcon = {
@@ -241,6 +246,15 @@ fun ScrollCategoryScreen(onBack: () -> Unit) {
             }
             AppSwitchRow("Show 'Scrolls Left' on Overlay", showScrollsLeft, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.SHOW_SCROLLS_LEFT, it) } }
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+
+            //Cheat Hours
+            Text("Cheat Hours", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
+            AppSwitchRow("Enable Cheat Hours", cheatEnabled, enabled = global) { scope.launch { dataStore.setSwitch(SettingsDataStore.CHEAT_HOURS_ENABLED, it) } }
+            if (cheatEnabled && global) {
+                CheatHoursScheduleUI(cheatSchedule, onScheduleChange = { day, range -> scope.launch { dataStore.setCheatHour(day, range) } })
+            }
+            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+
 
             //TikTok
             Text("TikTok", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp), color = MaterialTheme.colorScheme.primary)
@@ -587,6 +601,59 @@ fun PermissionCard(title: String, desc: String, isGranted: Boolean, onClick: () 
             Text(title, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
             Text(desc, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 8.dp))
             Button(onClick = onClick, enabled = !isGranted, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text(if (isGranted) "Granted" else "Grant Permission") }
+        }
+    }
+}
+
+@Composable
+fun CheatHoursScheduleUI(scheduleStr: String, onScheduleChange: (Int, String?) -> Unit) {
+    val context = LocalContext.current
+    val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    val scheduleMap = scheduleStr.split(",")
+        .filter { it.contains(":") }
+        .associate { it.substringBefore(":") to it.substringAfter(":") }
+
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+        days.forEachIndexed { index, dayName ->
+            val dayNum = index + 1
+            val range = scheduleMap[dayNum.toString()]
+            val isSet = range != null
+            val cardColor = if (isSet) Color(0xFF2196F3) else Color.Gray.copy(alpha = 0.3f)
+            val textColor = if (isSet) Color.White else MaterialTheme.colorScheme.onSurface
+
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
+                    val cal = Calendar.getInstance()
+                    TimePickerDialog(context, { _, h, m ->
+                        val startStr = String.format(java.util.Locale.getDefault(), "%02d:%02d", h, m)
+                        TimePickerDialog(context, { _, endH, endM ->
+                            val endStr = String.format(java.util.Locale.getDefault(), "%02d:%02d", endH, endM)
+                            onScheduleChange(dayNum, "$startStr-$endStr")
+                        }, h, m, true).show()
+                    }, cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE), true).show()
+                },
+                colors = CardDefaults.cardColors(containerColor = cardColor)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(dayName, fontWeight = FontWeight.Bold, color = textColor)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(range ?: "Not set", color = textColor)
+                        if (isSet) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            IconButton(
+                                onClick = { onScheduleChange(dayNum, null) },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Text("X", color = textColor, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -34,6 +34,8 @@ class SettingsDataStore(private val context: Context) {
 
         val SHOW_DEBUG_UI = booleanPreferencesKey("show_debug_ui")
 
+        val CHEAT_HOURS_ENABLED = booleanPreferencesKey("cheat_hours_enabled")
+        val CHEAT_HOURS_SCHEDULE = stringPreferencesKey("cheat_hours_schedule")
     }
 
     val globalEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[GLOBAL_ENABLED] ?: true }
@@ -49,6 +51,9 @@ class SettingsDataStore(private val context: Context) {
     val maxScrollsFlow: Flow<Int> = context.dataStore.data.map { it[MAX_SCROLLS] ?: 50 }
     val showScrollsLeftFlow: Flow<Boolean> = context.dataStore.data.map { it[SHOW_SCROLLS_LEFT] ?: true }
     val showDebugUiFlow: Flow<Boolean> = context.dataStore.data.map { it[SHOW_DEBUG_UI] ?: false }
+
+    val cheatHoursEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[CHEAT_HOURS_ENABLED] ?: false }
+    val cheatHoursScheduleFlow: Flow<String> = context.dataStore.data.map { it[CHEAT_HOURS_SCHEDULE] ?: "" }
 
     val dailyScrollsFlow: Flow<Int> = context.dataStore.data.map { prefs ->
         val today = LocalDate.now().toString()
@@ -150,6 +155,24 @@ class SettingsDataStore(private val context: Context) {
                 .take(30)
 
             prefs[HISTORY] = recentHistoryEntries.joinToString(",") { "${it.key}:${it.value}" }
+        }
+    }
+
+    suspend fun setCheatHour(day: Int, range: String?) {
+        context.dataStore.edit { prefs ->
+            val currentSchedule = prefs[CHEAT_HOURS_SCHEDULE] ?: ""
+            val scheduleMap = currentSchedule.split(",")
+                .filter { it.contains(":") }
+                .associate { it.substringBefore(":") to it.substringAfter(":") }
+                .toMutableMap()
+
+            if (range == null) {
+                scheduleMap.remove(day.toString())
+            } else {
+                scheduleMap[day.toString()] = range
+            }
+
+            prefs[CHEAT_HOURS_SCHEDULE] = scheduleMap.entries.joinToString(",") { "${it.key}:${it.value}" }
         }
     }
 }

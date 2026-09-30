@@ -39,6 +39,8 @@ class BlockerService : AccessibilityService() {
     private var ignoreDmTt = false
     private var maxScrolls = 50
     private var showScrollsLeft = true
+    private var cheatHoursEnabled = false
+    private var cheatHoursSchedule = ""
 
     private val targetPackages = setOf(
         "com.zhiliaoapp.musically",
@@ -59,6 +61,8 @@ class BlockerService : AccessibilityService() {
         scope.launch { dataStore.ignoreDmTtFlow.collect { ignoreDmTt = it } }
         scope.launch { dataStore.maxScrollsFlow.collect { maxScrolls = it } }
         scope.launch { dataStore.showScrollsLeftFlow.collect { showScrollsLeft = it } }
+        scope.launch { dataStore.cheatHoursEnabledFlow.collect { cheatHoursEnabled = it } }
+        scope.launch { dataStore.cheatHoursScheduleFlow.collect { cheatHoursSchedule = it } }
         scope.launch { dataStore.showDebugUiFlow.collect { showDebug -> overlay.setDebugVisible(showDebug) } }
     }
 
@@ -141,7 +145,9 @@ class BlockerService : AccessibilityService() {
             val skipIgDm = (ignoreDmGlobal && ignoreDmIg && section == "IG_DM_VIDEO")
 
             if (!skipIgHome && !skipIgComments && !justLeftComments && !skipTtDm && !skipIgDm) {
-                triggerScrollPenalty()
+                if (!isCheatHourActive()) {
+                    triggerScrollPenalty()
+                }
             }
         }
 
@@ -160,6 +166,35 @@ class BlockerService : AccessibilityService() {
             } else {
                 overlay.flashCount(newTotal, maxScrolls, showScrollsLeft) // NEW: Added showScrollsLeft
             }
+        }
+    }
+
+    private fun isCheatHourActive(): Boolean {
+        if (!cheatHoursEnabled || cheatHoursSchedule.isEmpty()) return false
+
+        return try {
+            val now = java.time.LocalDateTime.now()
+            val dayOfWeek = now.dayOfWeek.value
+
+            val scheduleMap = cheatHoursSchedule.split(",")
+                .filter { it.contains(":") }
+                .associate { it.substringBefore(":") to it.substringAfter(":") }
+
+            val todayRange = scheduleMap[dayOfWeek.toString()] ?: return false
+            val parts = todayRange.split("-")
+            if (parts.size != 2) return false
+
+            val startTime = java.time.LocalTime.parse(parts[0])
+            val endTime = java.time.LocalTime.parse(parts[1])
+            val currentTime = now.toLocalTime()
+
+            if (startTime.isBefore(endTime)) {
+                currentTime.isAfter(startTime) && currentTime.isBefore(endTime)
+            } else {
+                currentTime.isAfter(startTime) || currentTime.isBefore(endTime)
+            }
+        } catch (e: Exception) {
+            false
         }
     }
 
