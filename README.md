@@ -50,3 +50,6 @@ See your progress through the whole month and discover scroll patterns
 
 ### Acknowledgement
 This project was inspired by the now discontinued app [DigiPaws](https://github.com/nethical6/digipaws), which was missing few features i really wanted(day specific cheat hours, scroll limiter - not just counter, btw this is where i discovered this was possible, but in the end ended up using a different more robust system).
+
+### ‼️‼️‼️‼️INFO FOR SHIPWRIGHTS‼️‼️‼️‼️
+This app works by detecting like and comments counts of videos, if the video says unavalible/any error where the comments and likes counts are not visible it will not work! This app is meant for regular devices(not emulators) that are singed on and meant to be used by regualar users thanks.
